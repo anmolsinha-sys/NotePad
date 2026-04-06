@@ -1,0 +1,17 @@
+{
+    "name": "notepad-monorepo",
+    "version": "1.0.0",
+    "description": "Premium Notepad Web Application with Microservices",
+    "private": true,
+    "scripts": {
+        "dev:client": "cd client && npm run dev",
+        "dev:auth": "cd services/auth-service && npm run dev",
+        "dev:notes": "cd services/notes-service && npm run dev",
+        "dev:live": "cd services/live-service && npm run dev",
+        "dev": "concurrently \"npm run dev:client\" \"npm run dev:auth\" \"npm run dev:notes\" \"npm run dev:live\"",
+        "install:all": "npm install && cd client && npm install && cd ../services/auth-service && npm install && cd ../notes-service && npm install --legacy-peer-deps && cd ../live-service && npm install"
+    },
+    "devDependencies": {
+        "concurrently": "^8.2.2"
+    }
+}
