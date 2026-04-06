@@ -1,0 +1,64 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 222.2 84% 4.9%;
+  }
+
+  .dark {
+    --background: 222.2 84% 4.9%;
+    --foreground: 210 40% 98%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-white/5;
+  }
+  body {
+    @apply bg-[#0d1117] text-white;
+  }
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+}
+::-webkit-scrollbar-track {
+  @apply bg-transparent;
+}
+::-webkit-scrollbar-thumb {
+  @apply bg-white/10 rounded-full hover:bg-white/20 transition-all duration-300;
+}
+
+/* TipTap Editor Styles */
+.ProseMirror {
+  min-height: 500px;
+}
+
+.ProseMirror p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  color: #adb5bd;
+  pointer-events: none;
+  height: 0;
+}
+
+/* Code Highlighting */
+.hljs-keyword, .hljs-selector-tag, .hljs-title, .hljs-section {
+  color: #c678dd;
+}
+.hljs-string, .hljs-type, .hljs-built_in, .hljs-bullet, .hljs-params, .hljs-addition {
+  color: #98c379;
+}
+.hljs-comment, .hljs-quote {
+  color: #5c6370;
+  font-style: italic;
+}
+.hljs-number, .hljs-variable, .hljs-template-variable, .hljs-tag, .hljs-name, .hljs-selector-id, .hljs-selector-class, .hljs-regexp, .hljs-deletion {
+  color: #d19a66;
+}
+.hljs-function, .hljs-symbol, .hljs-bullet, .hljs-link {
+  color: #61afef;
+}
