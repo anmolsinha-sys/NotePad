@@ -1,4 +1,4 @@
-require('dotenv').config({ path: '../../.env' });
+require('dotenv').config();
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
@@ -74,7 +74,7 @@ mongoose
     .then(() => console.log('Notes Service: DB Connection Successful!'))
     .catch((err) => console.error('Notes Service: DB Connection Error:', err));
 
-const PORT = process.env.PORT_NOTES || 5002;
+const PORT = process.env.PORT || process.env.PORT_NOTES || 5002;
 app.listen(PORT, () => {
     console.log(`Notes Service running on port ${PORT}`);
 });

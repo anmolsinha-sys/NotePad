@@ -1,4 +1,4 @@
-require('dotenv').config({ path: '../../.env' });
+require('dotenv').config();
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
@@ -55,7 +55,7 @@ function getRandomColor() {
     return colors[Math.floor(Math.random() * colors.length)];
 }
 
-const PORT = process.env.PORT_LIVE || 5003;
+const PORT = process.env.PORT || process.env.PORT_LIVE || 5003;
 server.listen(PORT, () => {
     console.log(`Live Service running on port ${PORT}`);
 });
