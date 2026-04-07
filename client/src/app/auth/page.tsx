@@ -7,6 +7,27 @@ import Cookies from 'js-cookie';
 import { Mail, Lock, User, ArrowRight, Loader2, Info } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
+const getFriendlyError = (err: any, isLogin: boolean): string => {
+    const status = err.response?.status;
+    const rawMsg: string = (err.response?.data?.message || '').toLowerCase();
+
+    if (!navigator.onLine) return 'No internet connection. Please check your network.';
+    if (status === 401) return 'Incorrect email or password. Please try again.';
+    if (status === 409 || rawMsg.includes('duplicate') || rawMsg.includes('already exists')) {
+        if (rawMsg.includes('email')) return 'An account with this email already exists. Try logging in.';
+        if (rawMsg.includes('username')) return 'That username is taken. Please choose another one.';
+        return 'An account with these details already exists.';
+    }
+    if (status === 400) {
+        if (!isLogin && rawMsg.includes('password')) return 'Password must be at least 6 characters.';
+        return 'Please fill in all fields correctly.';
+    }
+    if (status === 500) return 'Server error. Please try again in a moment.';
+    if (status === 503 || err.code === 'ERR_NETWORK') return 'Cannot reach the server. Make sure your connection is working.';
+    return 'Something went wrong. Please try again.';
+};
+
+
 export default function AuthPage() {
     const [isLogin, setIsLogin] = useState(true);
     const [loading, setLoading] = useState(false);
@@ -31,7 +52,8 @@ export default function AuthPage() {
             Cookies.set('token', res.data.token, { expires: 90 });
             router.push('/dashboard');
         } catch (err: any) {
-            setError(err.response?.data?.message || 'Something went wrong. Please try again.');
+            setError(getFriendlyError(err, isLogin));
+
         } finally {
             setLoading(false);
         }
@@ -51,7 +73,7 @@ export default function AuthPage() {
             >
                 <div className="bg-[#161b22]/70 backdrop-blur-3xl border border-white/10 rounded-3xl p-10 shadow-[0_25px_50px_-12px_rgba(0,0,0,0.5)] overflow-hidden">
                     <div className="text-center mb-10">
-                        <h1 className="text-4xl font-extrabold bg-gradient-to-r from-blue-400 to-indigo-500 bg-clip-text text-transparent mb-3 tracking-tight">
+                        <h1 className="text-4xl font-extrabold bg-linear-to-r from-blue-400 to-indigo-500 bg-clip-text text-transparent mb-3 tracking-tight">
                             {isLogin ? 'Welcome Back' : 'Get Started'}
                         </h1>
                         <p className="text-gray-400 text-lg">
