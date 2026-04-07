@@ -1,4 +1,6 @@
-require('dotenv').config();
+const path = require('path');
+require('dotenv').config({ path: path.resolve(__dirname, '.env') });
+require('dotenv').config({ path: path.resolve(__dirname, '../../.env') });
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
@@ -10,7 +12,7 @@ app.use(cors());
 const server = http.createServer(app);
 const io = new Server(server, {
     cors: {
-        origin: process.env.CLIENT_URL || "http://localhost:3000",
+        origin: [process.env.CLIENT_URL || "http://localhost:3000", "http://127.0.0.1:3000"],
         methods: ["GET", "POST"]
     }
 });
@@ -33,6 +35,10 @@ io.on('connection', (socket) => {
 
     socket.on('update-note', ({ noteId, content }) => {
         socket.to(noteId).emit('note-updated', content);
+    });
+
+    socket.on('update-title', ({ noteId, title }) => {
+        socket.to(noteId).emit('title-updated', title);
     });
 
     socket.on('cursor-move', ({ noteId, pos, user }) => {

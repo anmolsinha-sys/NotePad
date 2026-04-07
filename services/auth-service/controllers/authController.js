@@ -1,5 +1,5 @@
 const jwt = require('jsonwebtoken');
-const User = require('../models/User');
+const bcrypt = require('bcryptjs');
 
 const signToken = (id) => {
     return jwt.sign({ id }, process.env.JWT_SECRET, {
@@ -8,10 +8,10 @@ const signToken = (id) => {
 };
 
 const createSendToken = (user, statusCode, res) => {
-    const token = signToken(user._id);
+    const token = signToken(user.id);
 
     // Remove password from output
-    user.password = undefined;
+    delete user.password;
 
     res.status(statusCode).json({
         status: 'success',
@@ -24,11 +24,18 @@ const createSendToken = (user, statusCode, res) => {
 
 exports.signup = async (req, res) => {
     try {
-        const newUser = await User.create({
-            username: req.body.username,
-            email: req.body.email,
-            password: req.body.password,
-        });
+        const { username, email, password } = req.body;
+
+        // Hash password manually since we don't have mongoose middleware
+        const hashedPassword = await bcrypt.hash(password, 12);
+
+        const { data: newUser, error } = await req.supabase
+            .from('users')
+            .insert([{ username, email, password: hashedPassword }])
+            .select()
+            .single();
+
+        if (error) throw new Error(error.message);
 
         createSendToken(newUser, 201, res);
     } catch (err) {
@@ -43,7 +50,6 @@ exports.login = async (req, res) => {
     try {
         const { email, password } = req.body;
 
-        // Check if email and password exist
         if (!email || !password) {
             return res.status(400).json({
                 status: 'fail',
@@ -51,10 +57,13 @@ exports.login = async (req, res) => {
             });
         }
 
-        // Check if user exists && password is correct
-        const user = await User.findOne({ email }).select('+password');
+        const { data: user, error } = await req.supabase
+            .from('users')
+            .select('*')
+            .eq('email', email)
+            .single();
 
-        if (!user || !(await user.comparePassword(password))) {
+        if (!user || !(await bcrypt.compare(password, user.password))) {
             return res.status(401).json({
                 status: 'fail',
                 message: 'Incorrect email or password',
@@ -88,7 +97,11 @@ exports.protect = async (req, res, next) => {
         }
 
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
-        const currentUser = await User.findById(decoded.id);
+        const { data: currentUser, error } = await req.supabase
+            .from('users')
+            .select('*')
+            .eq('id', decoded.id)
+            .single();
 
         if (!currentUser) {
             return res.status(401).json({

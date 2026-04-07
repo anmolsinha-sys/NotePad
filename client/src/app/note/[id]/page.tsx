@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { notesApi } from '@/lib/api';
+import { subscribeToTitleUpdate } from '@/lib/socket';
 import TiptapEditor from '@/components/Editor';
 import { motion } from 'framer-motion';
 import { FileText, ArrowLeft } from 'lucide-react';
@@ -10,6 +11,7 @@ import { FileText, ArrowLeft } from 'lucide-react';
 export default function SharedNotePage() {
     const { id } = useParams();
     const [note, setNote] = useState<any>(null);
+    const [canEdit, setCanEdit] = useState(false);
     const [loading, setLoading] = useState(true);
     const router = useRouter();
 
@@ -18,6 +20,7 @@ export default function SharedNotePage() {
             try {
                 const res = await notesApi.getNote(id as string);
                 setNote(res.data.data.note);
+                setCanEdit(res.data.data.canEdit);
             } catch (err) {
                 console.error('Failed to fetch shared note:', err);
             } finally {
@@ -26,6 +29,14 @@ export default function SharedNotePage() {
         };
 
         if (id) fetchNote();
+
+        const unsubTitle = subscribeToTitleUpdate((newTitle) => {
+            setNote((prev: any) => prev ? { ...prev, title: newTitle } : prev);
+        });
+
+        return () => {
+            unsubTitle();
+        };
     }, [id]);
 
     if (loading) {
@@ -68,11 +79,13 @@ export default function SharedNotePage() {
                     className="max-w-4xl mx-auto"
                 >
                     <TiptapEditor
-                        key={note._id}
-                        noteId={note._id}
+                        key={note.id}
+                        noteId={note.id}
                         initialContent={note.content}
                         initialTags={note.tags || []}
                         isShared={true}
+                        editable={canEdit}
+                        onSave={(content) => canEdit && notesApi.updateNote(note.id, { content })}
                     />
                 </motion.div>
             </main>

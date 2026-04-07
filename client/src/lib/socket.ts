@@ -1,8 +1,8 @@
 import { io, Socket } from 'socket.io-client';
 
 const SOCKET_URL = typeof window !== 'undefined'
-    ? `${window.location.protocol}//${window.location.hostname}:5003`
-    : 'http://localhost:5003';
+    ? `${window.location.protocol}//${window.location.hostname}:5004`
+    : 'http://localhost:5004';
 
 let socket: Socket | null = null;
 
@@ -34,13 +34,23 @@ export const disconnectSocket = () => {
 export const joinNoteRoom = (noteId: string, user: { name: string, email: string }) => {
     const s = initiateSocketConnection();
     const payload = { noteId, user };
-    if (s.connected) {
-        s.emit('join-note', payload);
-    } else {
-        s.once('connect', () => {
+
+    const join = () => {
+        if (s.connected) {
+            console.log(`📡 Emitting join-note for ${noteId}`);
             s.emit('join-note', payload);
-        });
-    }
+        }
+    };
+
+    // Join now if connected
+    join();
+
+    // Re-join on every (re)connect
+    s.on('connect', join);
+
+    return () => {
+        s.off('connect', join);
+    };
 };
 
 export const emitNoteUpdate = (noteId: string, content: string) => {
@@ -49,6 +59,15 @@ export const emitNoteUpdate = (noteId: string, content: string) => {
     } else {
         const s = initiateSocketConnection();
         s.emit('update-note', { noteId, content });
+    }
+};
+
+export const emitTitleUpdate = (noteId: string, title: string) => {
+    if (socket) {
+        socket.emit('update-title', { noteId, title });
+    } else {
+        const s = initiateSocketConnection();
+        s.emit('update-title', { noteId, title });
     }
 };
 
@@ -65,6 +84,12 @@ export const subscribeToNoteUpdate = (callback: (content: string) => void) => {
     };
     s.on('note-updated', handler);
     return () => s.off('note-updated', handler);
+};
+
+export const subscribeToTitleUpdate = (callback: (title: string) => void) => {
+    const s = initiateSocketConnection();
+    s.on('title-updated', callback);
+    return () => s.off('title-updated', callback);
 };
 
 export const subscribeToUsersUpdate = (callback: (users: any[]) => void) => {

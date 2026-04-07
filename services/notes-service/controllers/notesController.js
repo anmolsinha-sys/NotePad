@@ -1,4 +1,3 @@
-const Note = require('../models/Note');
 const cloudinary = require('cloudinary').v2;
 
 // Cloudinary Config
@@ -10,10 +9,16 @@ cloudinary.config({
 
 exports.createNote = async (req, res) => {
     try {
-        const newNote = await Note.create({
-            ...req.body,
-            owner: req.user.id,
-        });
+        const { data: newNote, error } = await req.supabase
+            .from('notes')
+            .insert([{
+                ...req.body,
+                owner_id: req.user.id,
+            }])
+            .select()
+            .single();
+
+        if (error) throw new Error(error.message);
 
         res.status(201).json({
             status: 'success',
@@ -31,12 +36,12 @@ exports.createNote = async (req, res) => {
 
 exports.getNotes = async (req, res) => {
     try {
-        const notes = await Note.find({
-            $or: [
-                { owner: req.user.id },
-                { collaborators: req.user.id },
-            ],
-        });
+        const { data: notes, error } = await req.supabase
+            .from('notes')
+            .select('*')
+            .or(`owner_id.eq.${req.user.id},collaborators.cs.{${req.user.id}}`);
+
+        if (error) throw new Error(error.message);
 
         res.status(200).json({
             status: 'success',
@@ -55,17 +60,37 @@ exports.getNotes = async (req, res) => {
 
 exports.getNote = async (req, res) => {
     try {
-        const note = await Note.findById(req.params.id);
-        if (!note) {
+        const { data: note, error } = await req.supabase
+            .from('notes')
+            .select('*')
+            .eq('id', req.params.id)
+            .single();
+
+        if (error || !note) {
             return res.status(404).json({
                 status: 'fail',
                 message: 'No note found with that ID',
             });
         }
+
+        // Determine if current requester can edit
+        // 1. If public and no user, can't edit
+        // 2. If user is owner, can edit
+        // 3. If user is in collaborators, can edit
+        let canEdit = false;
+        if (req.user) {
+            const isOwner = note.owner_id === req.user.id;
+            const isCollaborator = note.collaborators && note.collaborators.includes(req.user.id);
+            if (isOwner || isCollaborator) {
+                canEdit = true;
+            }
+        }
+
         res.status(200).json({
             status: 'success',
             data: {
                 note,
+                canEdit
             },
         });
     } catch (err) {
@@ -79,9 +104,15 @@ exports.getNote = async (req, res) => {
 exports.updateNote = async (req, res) => {
     try {
         const noteId = req.params.id;
-        const note = await Note.findById(noteId);
 
-        if (!note) {
+        // Fetch current note to check permissions
+        const { data: note, error: fetchError } = await req.supabase
+            .from('notes')
+            .select('*')
+            .eq('id', noteId)
+            .single();
+
+        if (fetchError || !note) {
             return res.status(404).json({
                 status: 'fail',
                 message: 'No note found with that ID',
@@ -89,10 +120,8 @@ exports.updateNote = async (req, res) => {
         }
 
         // Check if user is owner or collaborator
-        const isOwner = note.owner.toString() === req.user.id.toString();
-        const isCollaborator = note.collaborators.some(
-            (c) => c.toString() === req.user.id.toString()
-        );
+        const isOwner = note.owner_id === req.user.id;
+        const isCollaborator = note.collaborators && note.collaborators.includes(req.user.id);
 
         if (!isOwner && !isCollaborator) {
             return res.status(403).json({
@@ -101,10 +130,19 @@ exports.updateNote = async (req, res) => {
             });
         }
 
-        const updatedNote = await Note.findByIdAndUpdate(noteId, req.body, {
-            new: true,
-            runValidators: true,
-        });
+        // Sanitize update data
+        const updateData = { ...req.body };
+        delete updateData.id;
+        delete updateData.owner_id;
+
+        const { data: updatedNote, error: updateError } = await req.supabase
+            .from('notes')
+            .update(updateData)
+            .eq('id', noteId)
+            .select()
+            .single();
+
+        if (updateError) throw new Error(updateError.message);
 
         res.status(200).json({
             status: 'success',
@@ -123,23 +161,34 @@ exports.updateNote = async (req, res) => {
 exports.deleteNote = async (req, res) => {
     try {
         const noteId = req.params.id;
-        const note = await Note.findById(noteId);
 
-        if (!note) {
+        const { data: note, error: fetchError } = await req.supabase
+            .from('notes')
+            .select('owner_id')
+            .eq('id', noteId)
+            .single();
+
+        if (fetchError || !note) {
             return res.status(404).json({
                 status: 'fail',
                 message: 'No note found with that ID',
             });
         }
 
-        if (note.owner.toString() !== req.user.id.toString()) {
+        if (note.owner_id !== req.user.id) {
             return res.status(403).json({
                 status: 'fail',
                 message: 'Only the owner can delete a note',
             });
         }
 
-        await Note.findByIdAndDelete(noteId);
+        const { error: deleteError } = await req.supabase
+            .from('notes')
+            .delete()
+            .eq('id', noteId);
+
+        if (deleteError) throw new Error(deleteError.message);
+
         res.status(204).json({
             status: 'success',
             data: null,

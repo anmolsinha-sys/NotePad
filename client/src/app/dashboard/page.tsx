@@ -12,7 +12,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Cookies from 'js-cookie';
-import { disconnectSocket } from '@/lib/socket';
+import { disconnectSocket, emitTitleUpdate, subscribeToTitleUpdate } from '@/lib/socket';
 import { cn } from '@/lib/utils';
 
 export default function Dashboard() {
@@ -47,7 +47,31 @@ export default function Dashboard() {
             }
         };
         init();
+    }, []);
 
+    useEffect(() => {
+        if (!selectedNote) return;
+
+        const handleNoteUpdateEvent = (e: any) => {
+            const updatedNote = e.detail;
+            setNotes(prev => prev.map(n => n.id === updatedNote.id ? { ...n, ...updatedNote } : n));
+            setSelectedNote((prev: any) => prev?.id === updatedNote.id ? { ...prev, ...updatedNote } : prev);
+        };
+
+        window.addEventListener('note-updated' as any, handleNoteUpdateEvent);
+
+        const unsubTitle = subscribeToTitleUpdate((newTitle) => {
+            setNotes(prev => prev.map(n => n.id === selectedNote.id ? { ...n, title: newTitle } : n));
+            setSelectedNote((prev: any) => prev?.id === selectedNote.id ? { ...prev, title: newTitle } : prev);
+        });
+
+        return () => {
+            window.removeEventListener('note-updated' as any, handleNoteUpdateEvent);
+            unsubTitle();
+        };
+    }, [selectedNote?.id]);
+
+    useEffect(() => {
         return () => {
             disconnectSocket();
         };
@@ -68,13 +92,25 @@ export default function Dashboard() {
         if (!window.confirm('Delete this note?')) return;
         try {
             await notesApi.deleteNote(id);
-            const updatedNotes = notes.filter(n => n._id !== id);
+            const updatedNotes = notes.filter(n => n.id !== id);
             setNotes(updatedNotes);
-            if (selectedNote?._id === id) {
+            if (selectedNote?.id === id) {
                 setSelectedNote(updatedNotes[0] || null);
             }
         } catch (err) {
             console.error('Failed to delete note:', err);
+        }
+    };
+
+    const handleUpdateTitle = async (id: string, newTitle: string) => {
+        if (!newTitle.trim()) return;
+        try {
+            await notesApi.updateNote(id, { title: newTitle });
+            setNotes(prev => prev.map(n => n.id === id ? { ...n, title: newTitle } : n));
+            setSelectedNote((prev: any) => prev?.id === id ? { ...prev, title: newTitle } : prev);
+            emitTitleUpdate(id, newTitle);
+        } catch (err) {
+            console.error('Failed to update title:', err);
         }
     };
 
@@ -108,7 +144,7 @@ export default function Dashboard() {
         <div className="flex h-screen bg-[#0d1117] text-gray-200 overflow-hidden font-inter">
             {/* SIDEBAR */}
             <aside className={cn(
-                "flex-shrink-0 flex flex-col border-r border-white/5 bg-[#161b22]/50 backdrop-blur-3xl relative z-20 transition-all duration-500 ease-[cubic-bezier(0.4,0,0.2,1)] shadow-[20px_0_50px_rgba(0,0,0,0.3)]",
+                "shrink-0 flex flex-col border-r border-white/5 bg-[#161b22]/50 backdrop-blur-3xl relative z-20 transition-all duration-500 ease-in-out shadow-[20px_0_50px_rgba(0,0,0,0.3)]",
                 isSidebarMinimized ? "w-24" : "w-85"
             )}>
                 {/* Minimized Overlay Toggle */}
@@ -122,7 +158,7 @@ export default function Dashboard() {
                 {/* Sidebar Header */}
                 <div className={cn("p-6 border-b border-white/5 flex items-center justify-between", isSidebarMinimized && "p-4 justify-center flex-col gap-6")}>
                     <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 bg-gradient-to-br from-blue-600 to-indigo-700 rounded-xl flex items-center justify-center shadow-[0_0_20px_rgba(37,99,235,0.4)] shrink-0 ring-2 ring-white/5">
+                        <div className="w-10 h-10 bg-linear-to-br from-blue-600 to-indigo-700 rounded-xl flex items-center justify-center shadow-[0_0_20px_rgba(37,99,235,0.4)] shrink-0 ring-2 ring-white/5">
                             <FileText size={22} className="text-white" />
                         </div>
                         {!isSidebarMinimized && (
@@ -189,25 +225,25 @@ export default function Dashboard() {
                         !isSidebarMinimized && <div className="p-8 text-center text-gray-600 italic text-sm animate-fade-in">No artifacts found...</div>
                     ) : (
                         [...filteredNotes]
-                            .sort((a, b) => (b.isPinned ? 1 : 0) - (a.isPinned ? 1 : 0))
+                            .sort((a, b) => (b.is_pinned ? 1 : 0) - (a.is_pinned ? 1 : 0))
                             .map((note) => (
                                 <motion.div
-                                    key={note._id}
+                                    key={note.id}
                                     initial={{ opacity: 0, x: -10 }}
                                     animate={{ opacity: 1, x: 0 }}
                                     onClick={() => setSelectedNote(note)}
-                                    className={cn("group relative flex flex-col rounded-[1.5rem] cursor-pointer transition-all duration-300 border-2",
+                                    className={cn("group relative flex flex-col rounded-3xl cursor-pointer transition-all duration-300 border-2",
                                         isSidebarMinimized ? "p-3 items-center" : "p-5",
-                                        selectedNote?._id === note._id
+                                        selectedNote?.id === note.id
                                             ? 'bg-blue-600/10 border-blue-500/40 shadow-[0_8px_30px_rgba(0,0,0,0.3)]'
-                                            : 'bg-transparent border-transparent hover:bg-white/[0.03]'
+                                            : 'bg-transparent border-transparent hover:bg-white/3'
                                     )}
                                 >
                                     <div className={cn("flex items-center justify-between", !isSidebarMinimized && "mb-3")}>
                                         <div className="flex items-center gap-3 overflow-hidden">
-                                            {note.isPinned && <Pin size={isSidebarMinimized ? 16 : 14} className="text-amber-500 fill-amber-500/20 shrink-0" />}
+                                            {note.is_pinned && <Pin size={isSidebarMinimized ? 16 : 14} className="text-amber-500 fill-amber-500/20 shrink-0" />}
                                             {!isSidebarMinimized && (
-                                                <h4 className={cn("font-black text-sm truncate transition-colors", selectedNote?._id === note._id ? 'text-white' : 'text-gray-400 group-hover:text-gray-200')}>
+                                                <h4 className={cn("font-black text-sm truncate transition-colors", selectedNote?.id === note.id ? 'text-white' : 'text-gray-400 group-hover:text-gray-200')}>
                                                     {note.title}
                                                 </h4>
                                             )}
@@ -217,14 +253,14 @@ export default function Dashboard() {
                                                 <button
                                                     onClick={(e) => {
                                                         e.stopPropagation();
-                                                        notesApi.updateNote(note._id, { isPinned: !note.isPinned });
-                                                        setNotes(notes.map(n => n._id === note._id ? { ...n, isPinned: !n.isPinned } : n));
+                                                        notesApi.updateNote(note.id, { is_pinned: !note.is_pinned });
+                                                        setNotes(notes.map(n => n.id === note.id ? { ...n, is_pinned: !n.is_pinned } : n));
                                                     }}
-                                                    className={cn("p-2 rounded-xl transition-all", note.isPinned ? 'text-amber-500 bg-amber-500/10' : 'text-gray-500 hover:text-white hover:bg-white/10')}
+                                                    className={cn("p-2 rounded-xl transition-all", note.is_pinned ? 'text-amber-500 bg-amber-500/10' : 'text-gray-500 hover:text-white hover:bg-white/10')}
                                                 >
-                                                    <Pin size={14} className={note.isPinned ? 'fill-current' : ''} />
+                                                    <Pin size={14} className={note.is_pinned ? 'fill-current' : ''} />
                                                 </button>
-                                                <button onClick={(e) => handleDeleteNote(note._id, e)} className="p-2 rounded-xl text-gray-500 hover:text-red-400 hover:bg-red-400/10 transition-all">
+                                                <button onClick={(e) => handleDeleteNote(note.id, e)} className="p-2 rounded-xl text-gray-500 hover:text-red-400 hover:bg-red-400/10 transition-all">
                                                     <Trash2 size={14} />
                                                 </button>
                                             </div>
@@ -253,7 +289,7 @@ export default function Dashboard() {
                                                 </div>
                                                 <div className="flex items-center gap-1.5 text-[9px] font-black text-gray-600 uppercase tracking-tighter">
                                                     <Clock size={10} />
-                                                    {new Date(note.updatedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                                                    {new Date(note.updated_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
                                                 </div>
                                             </div>
                                         </>
@@ -265,8 +301,8 @@ export default function Dashboard() {
 
                 {/* Sidebar Footer */}
                 <div className={cn("p-4 border-t border-white/5 bg-[#0d1117]/40 transition-all", isSidebarMinimized && "p-3")}>
-                    <div className={cn("flex items-center gap-3 p-3 rounded-[1.25rem] bg-white/[0.03] border border-white/5 shadow-inner transition-all", isSidebarMinimized && "justify-center p-2 rounded-2xl")}>
-                        <div className="w-10 h-10 rounded-full bg-gradient-to-br from-indigo-500 via-purple-600 to-pink-600 flex items-center justify-center text-white font-black text-sm shadow-xl overflow-hidden ring-2 ring-white/10 shrink-0">
+                    <div className={cn("flex items-center gap-3 p-3 rounded-[1.25rem] bg-white/3 border border-white/5 shadow-inner transition-all", isSidebarMinimized && "justify-center p-2 rounded-2xl")}>
+                        <div className="w-10 h-10 rounded-full bg-linear-to-br from-indigo-500 via-purple-600 to-pink-600 flex items-center justify-center text-white font-black text-sm shadow-xl overflow-hidden ring-2 ring-white/10 shrink-0">
                             {user?.username?.[0]?.toUpperCase() || 'U'}
                         </div>
                         {!isSidebarMinimized && (
@@ -278,7 +314,7 @@ export default function Dashboard() {
                         {!isSidebarMinimized && (
                             <button
                                 onClick={handleLogout}
-                                className="p-2.5 text-gray-500 hover:text-white transition-all hover:bg-red-500/20 hover:text-red-400 rounded-xl group/logout"
+                                className="p-2.5 text-gray-500 transition-all hover:bg-red-500/20 hover:text-red-400 rounded-xl group/logout"
                                 title="Logout"
                             >
                                 <LogOut size={18} className="group-hover/logout:-translate-x-0.5 transition-transform" />
@@ -310,7 +346,23 @@ export default function Dashboard() {
                                         <FileText size={20} className="text-blue-500" />
                                     </div>
                                     <div>
-                                        <h2 className="text-xl font-black text-white tracking-tight leading-none uppercase">{selectedNote.title}</h2>
+                                        <input
+                                            type="text"
+                                            value={selectedNote.title}
+                                            onChange={(e) => {
+                                                const newTitle = e.target.value;
+                                                setSelectedNote({ ...selectedNote, title: newTitle });
+                                                setNotes(prev => prev.map(n => n.id === selectedNote.id ? { ...n, title: newTitle } : n));
+                                            }}
+                                            onBlur={(e) => handleUpdateTitle(selectedNote.id, e.target.value)}
+                                            onKeyDown={(e) => {
+                                                if (e.key === 'Enter') {
+                                                    (e.target as HTMLInputElement).blur();
+                                                }
+                                            }}
+                                            className="bg-transparent border-none outline-none text-xl font-black text-white tracking-tight leading-none uppercase p-0 w-full focus:ring-0"
+                                            placeholder="Note Title"
+                                        />
                                         <p className="text-[10px] text-gray-500 font-bold uppercase tracking-[0.2em] mt-1.5 flex items-center gap-2">
                                             <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]"></span>
                                             Active Perspective
@@ -353,7 +405,7 @@ export default function Dashboard() {
                             <Share2 size={14} className="text-blue-500 group-hover:scale-110 transition-transform" />
                             Share Area
                         </button>
-                        <div className="w-[1px] h-8 bg-white/10 mx-2"></div>
+                        <div className="w-px h-8 bg-white/10 mx-2"></div>
                         <button className="p-3 text-gray-500 hover:text-white hover:bg-white/5 rounded-2xl transition-all">
                             <Settings size={20} />
                         </button>
@@ -365,21 +417,22 @@ export default function Dashboard() {
                     <AnimatePresence mode="wait">
                         {selectedNote ? (
                             <motion.div
-                                key={selectedNote._id}
+                                key={selectedNote.id}
                                 initial={{ opacity: 0, y: 30 }}
                                 animate={{ opacity: 1, y: 0 }}
                                 exit={{ opacity: 0, y: -30 }}
                                 transition={{ type: 'spring', damping: 25, stiffness: 200 }}
                             >
                                 <TiptapEditor
-                                    key={selectedNote._id}
-                                    noteId={selectedNote._id}
+                                    key={selectedNote.id}
+                                    noteId={selectedNote.id}
                                     initialContent={selectedNote.content}
                                     initialTags={selectedNote.tags || []}
                                     isShared={selectedNote.isPublic || false}
+                                    editable={true}
                                     theme={currentTheme}
                                     onSave={(content, tags) => {
-                                        setNotes(notes.map(n => n._id === selectedNote._id ? { ...n, content, tags, updatedAt: new Date() } : n));
+                                        setNotes(notes.map(n => n.id === selectedNote.id ? { ...n, content, tags, updated_at: new Date() } : n));
                                     }}
                                 />
                             </motion.div>
@@ -389,7 +442,7 @@ export default function Dashboard() {
                                 animate={{ opacity: 1 }}
                                 className="h-full flex flex-col items-center justify-center text-center gap-8"
                             >
-                                <div className="w-32 h-32 bg-white/[0.02] rounded-[3rem] border border-white/5 flex items-center justify-center relative group">
+                                <div className="w-32 h-32 bg-white/2 rounded-[3rem] border border-white/5 flex items-center justify-center relative group">
                                     <div className="absolute inset-0 bg-blue-600/10 rounded-[3rem] blur-2xl opacity-0 group-hover:opacity-100 transition-opacity"></div>
                                     <FileText size={60} className="text-gray-700 transition-transform group-hover:scale-110 group-hover:text-blue-500/50" />
                                 </div>
@@ -416,7 +469,7 @@ export default function Dashboard() {
                 <ShareModal
                     isOpen={isShareModalOpen}
                     onClose={() => setIsShareModalOpen(false)}
-                    noteId={selectedNote._id}
+                    noteId={selectedNote.id}
                     noteTitle={selectedNote.title}
                     isPublic={selectedNote.isPublic}
                 />
