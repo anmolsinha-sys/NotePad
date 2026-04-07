@@ -1,8 +1,6 @@
 import { io, Socket } from 'socket.io-client';
 
-const SOCKET_URL = typeof window !== 'undefined'
-    ? `${window.location.protocol}//${window.location.hostname}:5004`
-    : 'http://localhost:5004';
+const SOCKET_URL = process.env.NEXT_PUBLIC_LIVE_URL || 'http://localhost:5004';
 
 let socket: Socket | null = null;
 

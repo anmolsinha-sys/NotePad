@@ -1,8 +1,8 @@
 import axios from 'axios';
 import Cookies from 'js-cookie';
 
-const AUTH_URL = 'http://localhost:5001/api/auth';
-const NOTES_URL = 'http://localhost:5002/api';
+const AUTH_URL = (process.env.NEXT_PUBLIC_AUTH_URL || 'http://localhost:5001') + '/api/auth';
+const NOTES_URL = (process.env.NEXT_PUBLIC_NOTES_URL || 'http://localhost:5002') + '/api';
 
 const api = axios.create({
     baseURL: NOTES_URL,
