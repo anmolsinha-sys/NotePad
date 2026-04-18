@@ -9,9 +9,10 @@ import CommandPalette, { type PaletteItem } from '@/components/CommandPalette';
 import KeyboardHelp from '@/components/KeyboardHelp';
 import HistoryDrawer from '@/components/HistoryDrawer';
 import { exportToPDF } from '@/lib/export';
+import { htmlToMarkdown, markdownToHtml, downloadMarkdown } from '@/lib/markdown';
 import {
     Plus, Search, LogOut, Pin, Trash2, Share2,
-    FileText, Command, History,
+    FileText, Command, History, Focus,
 } from 'lucide-react';
 import Cookies from 'js-cookie';
 import { disconnectSocket, emitTitleUpdate, subscribeToTitleUpdate, subscribeToConnectionState } from '@/lib/socket';
@@ -62,6 +63,7 @@ export default function Dashboard() {
     const [isPaletteOpen, setIsPaletteOpen] = useState(false);
     const [isHelpOpen, setIsHelpOpen] = useState(false);
     const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+    const [focusMode, setFocusMode] = useState(false);
 
     // init
     useEffect(() => {
@@ -206,11 +208,52 @@ export default function Dashboard() {
             } else if (mod && e.key === '/') {
                 e.preventDefault();
                 setIsHelpOpen((v) => !v);
+            } else if (mod && e.key === '.') {
+                e.preventDefault();
+                setFocusMode((v) => !v);
+            } else if (e.key === 'Escape' && focusMode) {
+                setFocusMode(false);
             }
         };
         window.addEventListener('keydown', onKey);
         return () => window.removeEventListener('keydown', onKey);
-    }, [createNote]);
+    }, [createNote, focusMode]);
+
+    const exportMarkdown = () => {
+        if (!selectedNote) return;
+        const md = htmlToMarkdown(selectedNote.content || '');
+        const safeTitle = (selectedNote.title || 'note').replace(/[^\w-]/g, '_') || 'note';
+        downloadMarkdown(safeTitle, md);
+        toast.success('Markdown exported');
+    };
+
+    const importMarkdownFiles = async (files: File[]) => {
+        const mdFiles = files.filter((f) => /\.(md|markdown|txt)$/i.test(f.name));
+        if (mdFiles.length === 0) {
+            toast.error('Drop a .md file to import');
+            return;
+        }
+        let imported = 0;
+        for (const file of mdFiles) {
+            try {
+                const text = await file.text();
+                const html = markdownToHtml(text);
+                const title = file.name.replace(/\.(md|markdown|txt)$/i, '') || 'Imported note';
+                const res = await notesApi.createNote({ title, content: html, tags: [] });
+                setNotes((prev) => [res.data.data.note, ...prev]);
+                imported += 1;
+            } catch (err: any) {
+                toast.error(err?.response?.data?.message || `Could not import ${file.name}`);
+            }
+        }
+        if (imported > 0) toast.success(`Imported ${imported} ${imported === 1 ? 'note' : 'notes'}`);
+    };
+
+    const onFilesDropped = (e: React.DragEvent) => {
+        e.preventDefault();
+        const files = Array.from(e.dataTransfer.files);
+        if (files.length > 0) importMarkdownFiles(files);
+    };
 
     // Palette items
     const paletteItems: PaletteItem[] = (() => {
@@ -220,7 +263,9 @@ export default function Dashboard() {
             ...(selectedNote ? [
                 { id: 'act:share', section: 'Actions' as const, icon: 'share' as const, label: 'Share current note', run: () => setIsShareModalOpen(true) },
                 { id: 'act:history', section: 'Actions' as const, icon: 'note' as const, label: 'Version history', run: () => setIsHistoryOpen(true) },
+                { id: 'act:focus', section: 'Actions' as const, icon: 'note' as const, label: focusMode ? 'Exit focus mode' : 'Focus mode', hint: '⌘.', run: () => setFocusMode((v) => !v) },
                 { id: 'act:pdf', section: 'Actions' as const, icon: 'export' as const, label: 'Export current note as PDF', run: () => exportToPDF('editor-content-target', `Note-${selectedNote.id}`) },
+                { id: 'act:md', section: 'Actions' as const, icon: 'export' as const, label: 'Export current note as Markdown', run: exportMarkdown },
             ] : []),
             { id: 'act:logout', section: 'Actions', icon: 'logout', label: 'Sign out', run: logout },
         ];
@@ -255,10 +300,18 @@ export default function Dashboard() {
     }
 
     return (
-        <div className="flex h-screen overflow-hidden" style={{ background: 'var(--bg)', color: 'var(--fg)' }}>
+        <div
+            className="flex h-screen overflow-hidden"
+            style={{ background: 'var(--bg)', color: 'var(--fg)' }}
+            onDragOver={(e) => { e.preventDefault(); }}
+            onDrop={onFilesDropped}
+        >
             {/* Sidebar */}
             <aside
-                className="w-[260px] flex flex-col shrink-0"
+                className={cn(
+                    'w-[260px] flex flex-col shrink-0 transition-all duration-150',
+                    focusMode && 'w-0 overflow-hidden opacity-0 pointer-events-none'
+                )}
                 style={{ borderRight: '1px solid var(--border)', background: 'var(--bg-panel)' }}
             >
                 <div className="h-11 px-3 flex items-center justify-between" style={{ borderBottom: '1px solid var(--border)' }}>
@@ -372,7 +425,13 @@ export default function Dashboard() {
             {/* Main */}
             <main className="flex-1 flex flex-col min-w-0">
                 {/* Header */}
-                <header className="h-11 px-4 flex items-center justify-between gap-3 shrink-0" style={{ borderBottom: '1px solid var(--border)', background: 'var(--bg-panel)' }}>
+                <header
+                    className={cn(
+                        'h-11 px-4 flex items-center justify-between gap-3 shrink-0 transition-opacity duration-150',
+                        focusMode && 'opacity-30 hover:opacity-100'
+                    )}
+                    style={{ borderBottom: '1px solid var(--border)', background: 'var(--bg-panel)' }}
+                >
                     {selectedNote ? (
                         <input
                             key={selectedNote.id}
@@ -394,6 +453,14 @@ export default function Dashboard() {
                             title="Command palette (⌘K)"
                         >
                             <Command size={11} /> <span className="kbd hidden md:inline-flex">K</span>
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => setFocusMode((v) => !v)}
+                            className="btn btn-ghost py-1 px-2 text-xs"
+                            title="Focus mode (⌘.)"
+                        >
+                            <Focus size={12} />
                         </button>
                         <button
                             type="button"
@@ -448,7 +515,10 @@ export default function Dashboard() {
 
                 {/* Status bar */}
                 <div
-                    className="h-7 px-4 flex items-center justify-between gap-4 text-[11px] font-mono shrink-0"
+                    className={cn(
+                        'h-7 px-4 flex items-center justify-between gap-4 text-[11px] font-mono shrink-0 transition-opacity duration-150',
+                        focusMode && 'opacity-30 hover:opacity-100'
+                    )}
                     style={{ borderTop: '1px solid var(--border)', background: 'var(--bg-panel)', color: 'var(--fg-dim)' }}
                 >
                     <div className="flex items-center gap-3">
