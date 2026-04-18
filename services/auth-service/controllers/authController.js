@@ -3,79 +3,88 @@ const bcrypt = require('bcryptjs');
 
 const signToken = (id) => {
     return jwt.sign({ id }, process.env.JWT_SECRET, {
-        expiresIn: '90d',
+        expiresIn: '30d',
     });
 };
 
 const createSendToken = (user, statusCode, res) => {
     const token = signToken(user.id);
-
-    // Remove password from output
     delete user.password;
 
     res.status(statusCode).json({
         status: 'success',
         token,
-        data: {
-            user,
-        },
+        data: { user },
     });
 };
 
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const USERNAME_RE = /^[a-zA-Z0-9_.-]{3,32}$/;
+
 exports.signup = async (req, res) => {
     try {
-        const { username, email, password } = req.body;
+        const { username, email, password } = req.body || {};
 
-        // Hash password manually since we don't have mongoose middleware
+        if (!username || !email || !password) {
+            return res.status(400).json({ status: 'fail', message: 'Username, email, and password are required.' });
+        }
+        if (!EMAIL_RE.test(email)) {
+            return res.status(400).json({ status: 'fail', message: 'Please provide a valid email address.' });
+        }
+        if (!USERNAME_RE.test(username)) {
+            return res.status(400).json({ status: 'fail', message: 'Username must be 3–32 characters (letters, numbers, . _ -).' });
+        }
+        if (typeof password !== 'string' || password.length < 8) {
+            return res.status(400).json({ status: 'fail', message: 'Password must be at least 8 characters.' });
+        }
+
         const hashedPassword = await bcrypt.hash(password, 12);
 
         const { data: newUser, error } = await req.supabase
             .from('users')
-            .insert([{ username, email, password: hashedPassword }])
+            .insert([{ username, email: email.toLowerCase(), password: hashedPassword }])
             .select()
             .single();
 
-        if (error) throw new Error(error.message);
+        if (error) {
+            console.error('[auth.signup]', error);
+            const msg = (error.message || '').toLowerCase();
+            if (msg.includes('duplicate') || msg.includes('unique')) {
+                const field = msg.includes('username') ? 'username' : 'email';
+                return res.status(409).json({ status: 'fail', message: `That ${field} is already taken.` });
+            }
+            return res.status(400).json({ status: 'fail', message: 'Signup failed. Please try again.' });
+        }
 
         createSendToken(newUser, 201, res);
     } catch (err) {
-        res.status(400).json({
-            status: 'fail',
-            message: err.message,
-        });
+        console.error('[auth.signup]', err);
+        res.status(500).json({ status: 'fail', message: 'Signup failed. Please try again.' });
     }
 };
 
 exports.login = async (req, res) => {
     try {
-        const { email, password } = req.body;
+        const { email, password } = req.body || {};
 
         if (!email || !password) {
-            return res.status(400).json({
-                status: 'fail',
-                message: 'Please provide email and password!',
-            });
+            return res.status(400).json({ status: 'fail', message: 'Please provide email and password.' });
         }
 
-        const { data: user, error } = await req.supabase
+        const { data: user } = await req.supabase
             .from('users')
             .select('*')
-            .eq('email', email)
+            .eq('email', email.toLowerCase())
             .single();
 
         if (!user || !(await bcrypt.compare(password, user.password))) {
-            return res.status(401).json({
-                status: 'fail',
-                message: 'Incorrect email or password',
-            });
+            return res.status(401).json({ status: 'fail', message: 'Incorrect email or password.' });
         }
 
         createSendToken(user, 200, res);
     } catch (err) {
-        res.status(400).json({
-            status: 'fail',
-            message: err.message,
-        });
+        console.error('[auth.login]', err);
+        res.status(500).json({ status: 'fail', message: 'Login failed. Please try again.' });
     }
 };
 
@@ -106,16 +115,17 @@ exports.protect = async (req, res, next) => {
         if (!currentUser) {
             return res.status(401).json({
                 status: 'fail',
-                message: 'The user belonging to this token no longer exists.',
+                message: 'Session expired. Please log in again.',
             });
         }
 
+        delete currentUser.password;
         req.user = currentUser;
         next();
     } catch (err) {
         res.status(401).json({
             status: 'fail',
-            message: 'Invalid token. Please log in again!',
+            message: 'Session expired. Please log in again.',
         });
     }
 };

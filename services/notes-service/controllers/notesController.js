@@ -1,36 +1,50 @@
 const cloudinary = require('cloudinary').v2;
 
-// Cloudinary Config
 cloudinary.config({
     cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
     api_key: process.env.CLOUDINARY_API_KEY,
     api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
+const UPDATABLE_FIELDS = ['title', 'content', 'tags', 'is_pinned', 'is_public', 'type', 'language', 'images'];
+const MAX_CONTENT_BYTES = 1_500_000;
+
+const pickUpdate = (body = {}) => {
+    const out = {};
+    for (const key of UPDATABLE_FIELDS) {
+        if (Object.prototype.hasOwnProperty.call(body, key)) out[key] = body[key];
+    }
+    return out;
+};
+
+const canRead = (note, user) => {
+    if (note.is_public) return { ok: true, canEdit: Boolean(user && user.id === note.owner_id) };
+    if (!user) return { ok: false };
+    if (user.id === note.owner_id) return { ok: true, canEdit: true };
+    if (Array.isArray(note.collaborators) && note.collaborators.includes(user.id)) {
+        return { ok: true, canEdit: true };
+    }
+    return { ok: false };
+};
+
 exports.createNote = async (req, res) => {
     try {
+        const payload = pickUpdate(req.body);
         const { data: newNote, error } = await req.supabase
             .from('notes')
-            .insert([{
-                ...req.body,
-                owner_id: req.user.id,
-            }])
+            .insert([{ ...payload, owner_id: req.user.id }])
             .select()
             .single();
 
-        if (error) throw new Error(error.message);
+        if (error) {
+            console.error('[notes.create]', error);
+            return res.status(400).json({ status: 'fail', message: 'Could not create note.' });
+        }
 
-        res.status(201).json({
-            status: 'success',
-            data: {
-                note: newNote,
-            },
-        });
+        res.status(201).json({ status: 'success', data: { note: newNote } });
     } catch (err) {
-        res.status(400).json({
-            status: 'fail',
-            message: err.message,
-        });
+        console.error('[notes.create]', err);
+        res.status(500).json({ status: 'fail', message: 'Could not create note.' });
     }
 };
 
@@ -39,22 +53,22 @@ exports.getNotes = async (req, res) => {
         const { data: notes, error } = await req.supabase
             .from('notes')
             .select('*')
-            .or(`owner_id.eq.${req.user.id},collaborators.cs.{${req.user.id}}`);
+            .or(`owner_id.eq.${req.user.id},collaborators.cs.{${req.user.id}}`)
+            .order('updated_at', { ascending: false });
 
-        if (error) throw new Error(error.message);
+        if (error) {
+            console.error('[notes.list]', error);
+            return res.status(400).json({ status: 'fail', message: 'Could not load notes.' });
+        }
 
         res.status(200).json({
             status: 'success',
             results: notes.length,
-            data: {
-                notes,
-            },
+            data: { notes },
         });
     } catch (err) {
-        res.status(400).json({
-            status: 'fail',
-            message: err.message,
-        });
+        console.error('[notes.list]', err);
+        res.status(500).json({ status: 'fail', message: 'Could not load notes.' });
     }
 };
 
@@ -67,37 +81,24 @@ exports.getNote = async (req, res) => {
             .single();
 
         if (error || !note) {
-            return res.status(404).json({
-                status: 'fail',
-                message: 'No note found with that ID',
-            });
+            return res.status(404).json({ status: 'fail', message: 'Note not found.' });
         }
 
-        // Determine if current requester can edit
-        // 1. If public and no user, can't edit
-        // 2. If user is owner, can edit
-        // 3. If user is in collaborators, can edit
-        let canEdit = false;
-        if (req.user) {
-            const isOwner = note.owner_id === req.user.id;
-            const isCollaborator = note.collaborators && note.collaborators.includes(req.user.id);
-            if (isOwner || isCollaborator) {
-                canEdit = true;
-            }
+        const access = canRead(note, req.user);
+        if (!access.ok) {
+            return res.status(req.user ? 403 : 401).json({
+                status: 'fail',
+                message: req.user ? 'You do not have access to this note.' : 'Sign in to view this note.',
+            });
         }
 
         res.status(200).json({
             status: 'success',
-            data: {
-                note,
-                canEdit
-            },
+            data: { note, canEdit: Boolean(access.canEdit) },
         });
     } catch (err) {
-        res.status(400).json({
-            status: 'fail',
-            message: err.message,
-        });
+        console.error('[notes.get]', err);
+        res.status(500).json({ status: 'fail', message: 'Could not load note.' });
     }
 };
 
@@ -105,35 +106,37 @@ exports.updateNote = async (req, res) => {
     try {
         const noteId = req.params.id;
 
-        // Fetch current note to check permissions
         const { data: note, error: fetchError } = await req.supabase
             .from('notes')
-            .select('*')
+            .select('id, owner_id, collaborators')
             .eq('id', noteId)
             .single();
 
         if (fetchError || !note) {
-            return res.status(404).json({
-                status: 'fail',
-                message: 'No note found with that ID',
-            });
+            return res.status(404).json({ status: 'fail', message: 'Note not found.' });
         }
 
-        // Check if user is owner or collaborator
         const isOwner = note.owner_id === req.user.id;
-        const isCollaborator = note.collaborators && note.collaborators.includes(req.user.id);
-
+        const isCollaborator = Array.isArray(note.collaborators) && note.collaborators.includes(req.user.id);
         if (!isOwner && !isCollaborator) {
-            return res.status(403).json({
-                status: 'fail',
-                message: 'You do not have permission to update this note',
-            });
+            return res.status(403).json({ status: 'fail', message: 'You do not have permission to edit this note.' });
         }
 
-        // Sanitize update data
-        const updateData = { ...req.body };
-        delete updateData.id;
-        delete updateData.owner_id;
+        const updateData = pickUpdate(req.body);
+
+        // Only the owner can change sharing/pin state.
+        if (!isOwner) {
+            delete updateData.is_public;
+            delete updateData.is_pinned;
+        }
+
+        if (typeof updateData.content === 'string' && updateData.content.length > MAX_CONTENT_BYTES) {
+            return res.status(413).json({ status: 'fail', message: 'Note is too large. Split it up.' });
+        }
+
+        if (Object.keys(updateData).length === 0) {
+            return res.status(400).json({ status: 'fail', message: 'Nothing to update.' });
+        }
 
         const { data: updatedNote, error: updateError } = await req.supabase
             .from('notes')
@@ -142,19 +145,15 @@ exports.updateNote = async (req, res) => {
             .select()
             .single();
 
-        if (updateError) throw new Error(updateError.message);
+        if (updateError) {
+            console.error('[notes.update]', updateError);
+            return res.status(400).json({ status: 'fail', message: 'Could not update note.' });
+        }
 
-        res.status(200).json({
-            status: 'success',
-            data: {
-                note: updatedNote,
-            },
-        });
+        res.status(200).json({ status: 'success', data: { note: updatedNote } });
     } catch (err) {
-        res.status(400).json({
-            status: 'fail',
-            message: err.message,
-        });
+        console.error('[notes.update]', err);
+        res.status(500).json({ status: 'fail', message: 'Could not update note.' });
     }
 };
 
@@ -169,17 +168,11 @@ exports.deleteNote = async (req, res) => {
             .single();
 
         if (fetchError || !note) {
-            return res.status(404).json({
-                status: 'fail',
-                message: 'No note found with that ID',
-            });
+            return res.status(404).json({ status: 'fail', message: 'Note not found.' });
         }
 
         if (note.owner_id !== req.user.id) {
-            return res.status(403).json({
-                status: 'fail',
-                message: 'Only the owner can delete a note',
-            });
+            return res.status(403).json({ status: 'fail', message: 'Only the owner can delete this note.' });
         }
 
         const { error: deleteError } = await req.supabase
@@ -187,41 +180,33 @@ exports.deleteNote = async (req, res) => {
             .delete()
             .eq('id', noteId);
 
-        if (deleteError) throw new Error(deleteError.message);
+        if (deleteError) {
+            console.error('[notes.delete]', deleteError);
+            return res.status(400).json({ status: 'fail', message: 'Could not delete note.' });
+        }
 
-        res.status(204).json({
-            status: 'success',
-            data: null,
-        });
+        res.status(204).end();
     } catch (err) {
-        res.status(400).json({
-            status: 'fail',
-            message: err.message,
-        });
+        console.error('[notes.delete]', err);
+        res.status(500).json({ status: 'fail', message: 'Could not delete note.' });
     }
 };
 
 exports.uploadImage = async (req, res) => {
     try {
         if (!req.file) {
-            return res.status(400).json({
-                status: 'fail',
-                message: 'Please upload an image!',
-            });
+            return res.status(400).json({ status: 'fail', message: 'No image file provided.' });
         }
 
-        // File is already uploaded to Cloudinary via Multer-Storage-Cloudinary
         res.status(200).json({
             status: 'success',
             data: {
                 url: req.file.path,
-                public_id: req.file.filename,
+                publicId: req.file.filename,
             },
         });
     } catch (err) {
-        res.status(400).json({
-            status: 'fail',
-            message: err.message,
-        });
+        console.error('[notes.upload]', err);
+        res.status(500).json({ status: 'fail', message: 'Upload failed.' });
     }
 };

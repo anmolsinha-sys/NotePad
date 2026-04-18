@@ -1,6 +1,6 @@
 import { io, Socket } from 'socket.io-client';
 
-const SOCKET_URL = process.env.NEXT_PUBLIC_LIVE_URL || 'http://localhost:5004';
+const SOCKET_URL = process.env.NEXT_PUBLIC_LIVE_URL || 'http://localhost:5003';
 
 let socket: Socket | null = null;
 

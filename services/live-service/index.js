@@ -1,5 +1,4 @@
 const path = require('path');
-require('dotenv').config({ path: path.resolve(__dirname, '.env') });
 require('dotenv').config({ path: path.resolve(__dirname, '../../.env') });
 const express = require('express');
 const http = require('http');
@@ -7,14 +6,30 @@ const { Server } = require('socket.io');
 const cors = require('cors');
 
 const app = express();
-app.use(cors());
+
+const allowedOrigins = (process.env.CLIENT_URL || 'http://localhost:3000,http://127.0.0.1:3000')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+app.use(cors({
+    origin(origin, cb) {
+        if (!origin) return cb(null, true);
+        if (allowedOrigins.includes(origin)) return cb(null, true);
+        return cb(new Error('Not allowed by CORS'));
+    },
+    credentials: true,
+}));
+
+app.get('/health', (req, res) => res.json({ status: 'ok' }));
 
 const server = http.createServer(app);
 const io = new Server(server, {
     cors: {
-        origin: [process.env.CLIENT_URL || "http://localhost:3000", "http://127.0.0.1:3000"],
-        methods: ["GET", "POST"]
-    }
+        origin: allowedOrigins,
+        methods: ['GET', 'POST'],
+        credentials: true,
+    },
 });
 
 const rooms = new Map(); // noteId -> Set of users { id, name, color }
