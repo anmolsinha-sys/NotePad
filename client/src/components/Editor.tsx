@@ -4,6 +4,8 @@ import { useEditor, EditorContent, BubbleMenu } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import Highlight from '@tiptap/extension-highlight';
 import Underline from '@tiptap/extension-underline';
+import { TextStyle } from '@tiptap/extension-text-style';
+import { Color } from '@tiptap/extension-color';
 import { EnhancedCodeBlock } from '@/lib/code-block';
 import { Table } from '@tiptap/extension-table';
 import { TableRow } from '@tiptap/extension-table-row';
@@ -36,6 +38,7 @@ import socket, {
 } from '@/lib/socket';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
+import ColorPicker from '@/components/ColorPicker';
 
 const lowlight = createLowlight(common);
 
@@ -117,6 +120,8 @@ const TiptapEditor = ({
         extensions: [
             StarterKit.configure({ codeBlock: false }),
             Underline,
+            TextStyle,
+            Color,
             Highlight.configure({ multicolor: true }),
             EnhancedCodeBlock.configure({ lowlight }),
             Mermaid,
@@ -486,9 +491,22 @@ const TiptapEditor = ({
                     <ToolButton active={editor.isActive('underline')} onClick={() => (editor.chain() as any).focus().toggleUnderline().run()} title="Underline (⌘U)">
                         <UnderlineIcon size={13} />
                     </ToolButton>
-                    <ToolButton active={editor.isActive('highlight')} onClick={() => editor.chain().focus().toggleHighlight().run()} title="Highlight">
+                    <ToolButton active={editor.isActive('highlight')} onClick={() => editor.chain().focus().toggleHighlight().run()} title="Highlight (default)">
                         <Highlighter size={13} />
                     </ToolButton>
+                    <ColorPicker
+                        currentColor={editor.getAttributes('textStyle').color || null}
+                        onTextColor={(color) => {
+                            const chain = (editor.chain() as any).focus();
+                            if (color) chain.setColor(color).run();
+                            else chain.unsetColor().run();
+                        }}
+                        onHighlight={(color) => {
+                            const chain = editor.chain().focus();
+                            if (color) chain.setHighlight({ color }).run();
+                            else chain.unsetHighlight().run();
+                        }}
+                    />
                     <ToolButton active={editor.isActive('code')} onClick={() => editor.chain().focus().toggleCode().run()} title="Inline code">
                         <Code size={13} />
                     </ToolButton>

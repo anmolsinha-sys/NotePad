@@ -503,11 +503,16 @@ export default function Dashboard() {
 
                 <div className="px-2 py-2" style={{ borderBottom: '1px solid var(--border)' }}>
                     <div className="relative">
-                        <Search className="absolute left-2 top-1/2 -translate-y-1/2 pointer-events-none" size={12} style={{ color: 'var(--fg-dim)' }} />
+                        <Search
+                            className="absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none"
+                            size={13}
+                            style={{ color: 'var(--fg-dim)' }}
+                        />
                         <input
                             type="text"
                             placeholder="Search"
-                            className="input pl-7 py-1.5 text-[13px]"
+                            className="input py-1.5 text-[13px]"
+                            style={{ paddingLeft: '1.875rem' }}
                             value={searchQuery}
                             onChange={(e) => setSearchQuery(e.target.value)}
                         />
