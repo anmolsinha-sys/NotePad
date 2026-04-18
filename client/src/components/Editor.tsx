@@ -7,7 +7,7 @@ import Underline from '@tiptap/extension-underline';
 import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight';
 import { common, createLowlight } from 'lowlight';
 import '@tiptap/extension-image';
-import ImageResize from 'tiptap-extension-resize-image';
+import { FlexImage } from '@/lib/flex-image';
 import Placeholder from '@tiptap/extension-placeholder';
 import { Mermaid } from '@/lib/mermaid-extension';
 import { SlashCommands } from '@/lib/slash-commands';
@@ -19,6 +19,7 @@ import {
     Highlighter, Underline as UnderlineIcon, Image as ImageIcon,
     Save, Download, Tag as TagIcon, X, Terminal, Sparkles, Type,
     Heading1, Heading2, Heading3, Images,
+    AlignLeft, AlignCenter, AlignRight, Trash2, Move, Anchor,
 } from 'lucide-react';
 import { exportToPDF } from '@/lib/export';
 import { notesApi } from '@/lib/api';
@@ -106,9 +107,7 @@ const TiptapEditor = ({
             CodeBlockLowlight.configure({ lowlight }),
             Mermaid,
             Placeholder.configure({ placeholder: "Start typing. '/' for commands." }),
-            ImageResize.extend({ draggable: true }).configure({
-                inline: true,
-            }),
+            FlexImage.configure({ inline: true }),
             ImageGallery,
             SlashCommands,
         ],
@@ -443,7 +442,14 @@ const TiptapEditor = ({
             )}
 
             {editable && (
-                <BubbleMenu editor={editor} tippyOptions={{ duration: 100 }}>
+                <BubbleMenu
+                    editor={editor}
+                    tippyOptions={{ duration: 100, placement: 'top' }}
+                    shouldShow={({ editor, state }) => {
+                        const { from, to } = state.selection;
+                        return editor.isEditable && from !== to && !editor.isActive('image');
+                    }}
+                >
                     <div className="surface px-1 py-0.5 flex items-center gap-0.5 shadow-lg">
                         <ToolButton active={editor.isActive('bold')} onClick={() => editor.chain().focus().toggleBold().run()}>
                             <Bold size={12} />
@@ -456,6 +462,67 @@ const TiptapEditor = ({
                         </ToolButton>
                         <ToolButton active={editor.isActive('code')} onClick={() => editor.chain().focus().toggleCode().run()}>
                             <Code size={12} />
+                        </ToolButton>
+                    </div>
+                </BubbleMenu>
+            )}
+
+            {editable && (
+                <BubbleMenu
+                    editor={editor}
+                    tippyOptions={{ duration: 100, placement: 'top' }}
+                    shouldShow={({ editor }) => editor.isActive('image')}
+                >
+                    <div className="surface px-1 py-0.5 flex items-center gap-0.5 shadow-lg">
+                        <ToolButton
+                            active={editor.isActive('image', { mode: 'free' })}
+                            onClick={() => (editor.chain() as any).focus().setImageMode('free').run()}
+                            title="Free position (drag anywhere)"
+                        >
+                            <Move size={12} />
+                        </ToolButton>
+                        <ToolButton
+                            active={editor.isActive('image', { mode: 'flow' })}
+                            onClick={() => (editor.chain() as any).focus().setImageMode('flow').run()}
+                            title="Dock to text flow"
+                        >
+                            <Anchor size={12} />
+                        </ToolButton>
+                        <div className="w-px h-4 mx-0.5" style={{ background: 'var(--border)' }} />
+                        <ToolButton
+                            active={editor.isActive('image', { align: 'left' })}
+                            onClick={() => (editor.chain() as any).focus().setImageAlign('left').run()}
+                            title="Float left"
+                        >
+                            <AlignLeft size={12} />
+                        </ToolButton>
+                        <ToolButton
+                            active={editor.isActive('image', { align: 'center' })}
+                            onClick={() => (editor.chain() as any).focus().setImageAlign('center').run()}
+                            title="Center"
+                        >
+                            <AlignCenter size={12} />
+                        </ToolButton>
+                        <ToolButton
+                            active={editor.isActive('image', { align: 'right' })}
+                            onClick={() => (editor.chain() as any).focus().setImageAlign('right').run()}
+                            title="Float right"
+                        >
+                            <AlignRight size={12} />
+                        </ToolButton>
+                        <ToolButton
+                            active={editor.isActive('image', { align: 'inline' })}
+                            onClick={() => (editor.chain() as any).focus().setImageAlign('inline').run()}
+                            title="Inline with text"
+                        >
+                            <ImageIcon size={12} />
+                        </ToolButton>
+                        <div className="w-px h-4 mx-0.5" style={{ background: 'var(--border)' }} />
+                        <ToolButton
+                            onClick={() => editor.chain().focus().deleteSelection().run()}
+                            title="Remove"
+                        >
+                            <Trash2 size={12} />
                         </ToolButton>
                     </div>
                 </BubbleMenu>
