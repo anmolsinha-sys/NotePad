@@ -1,5 +1,6 @@
 import { Node, mergeAttributes } from '@tiptap/core';
 import Suggestion from '@tiptap/suggestion';
+import { PluginKey } from '@tiptap/pm/state';
 import { ReactRenderer } from '@tiptap/react';
 import tippy, { type Instance as TippyInstance } from 'tippy.js';
 import WikilinkMenu from '@/components/WikilinkMenu';
@@ -46,6 +47,7 @@ export const Wikilink = Node.create({
     addOptions() {
         return {
             suggestion: {
+                pluginKey: new PluginKey('wikilinkSuggestion'),
                 char: '[[',
                 startOfLine: false,
                 allowSpaces: true,

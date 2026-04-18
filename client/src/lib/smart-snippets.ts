@@ -1,5 +1,6 @@
 import { Extension, InputRule } from '@tiptap/core';
 import Suggestion from '@tiptap/suggestion';
+import { PluginKey } from '@tiptap/pm/state';
 import { ReactRenderer } from '@tiptap/react';
 import tippy, { type Instance as TippyInstance } from 'tippy.js';
 import EmojiMenu from '@/components/EmojiMenu';
@@ -45,6 +46,7 @@ export const SmartSnippets = Extension.create({
     addOptions() {
         return {
             suggestion: {
+                pluginKey: new PluginKey('emojiSuggestion'),
                 char: ':',
                 startOfLine: false,
                 allowSpaces: false,

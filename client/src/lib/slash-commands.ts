@@ -1,5 +1,6 @@
 import { Extension, type Editor, type Range } from '@tiptap/core';
 import Suggestion from '@tiptap/suggestion';
+import { PluginKey } from '@tiptap/pm/state';
 import { ReactRenderer } from '@tiptap/react';
 import type { Instance as TippyInstance } from 'tippy.js';
 import tippy from 'tippy.js';
@@ -80,6 +81,7 @@ export const SlashCommands = Extension.create({
     addOptions() {
         return {
             suggestion: {
+                pluginKey: new PluginKey('slashSuggestion'),
                 char: '/',
                 startOfLine: false,
                 items: ({ query }: { query: string }) => {
