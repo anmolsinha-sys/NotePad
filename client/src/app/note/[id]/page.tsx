@@ -6,7 +6,8 @@ import Cookies from 'js-cookie';
 import { notesApi } from '@/lib/api';
 import { subscribeToTitleUpdate, subscribeToConnectionState } from '@/lib/socket';
 import TiptapEditor from '@/components/Editor';
-import { FileText, ArrowLeft, Eye } from 'lucide-react';
+import { FileText, ArrowLeft, Eye, Lock } from 'lucide-react';
+import { isEncryptedPayload } from '@/lib/crypto';
 
 export default function SharedNotePage() {
     const { id } = useParams();
@@ -65,6 +66,23 @@ export default function SharedNotePage() {
                 <h2 className="text-base font-medium">Note not found</h2>
                 <p className="text-xs" style={{ color: 'var(--fg-muted)' }}>This note may have been deleted or is private.</p>
                 <button onClick={() => router.push('/')} className="btn btn-primary text-xs mt-1">Go home</button>
+            </div>
+        );
+    }
+
+    const encrypted = note.is_encrypted || isEncryptedPayload(note.content);
+    if (encrypted) {
+        return (
+            <div className="min-h-screen flex flex-col items-center justify-center gap-3 px-6 text-center" style={{ background: 'var(--bg)', color: 'var(--fg)' }}>
+                <Lock size={22} style={{ color: 'var(--accent-strong)' }} />
+                <h2 className="text-base font-medium">This note is encrypted</h2>
+                <p className="text-xs max-w-sm" style={{ color: 'var(--fg-muted)' }}>
+                    The owner protected this note with a passphrase. Contents are encrypted client-side — no one can read them without the passphrase, not even the server.
+                </p>
+                <p className="text-[11px]" style={{ color: 'var(--fg-dim)' }}>
+                    Ask the owner to remove the password before sharing, or sign in and open it from your own dashboard if you have the passphrase.
+                </p>
+                <button onClick={() => router.push('/dashboard')} className="btn btn-ghost text-xs mt-2">Back to dashboard</button>
             </div>
         );
     }
