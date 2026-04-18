@@ -7,10 +7,11 @@ import TiptapEditor from '@/components/Editor';
 import ShareModal from '@/components/ShareModal';
 import CommandPalette, { type PaletteItem } from '@/components/CommandPalette';
 import KeyboardHelp from '@/components/KeyboardHelp';
+import HistoryDrawer from '@/components/HistoryDrawer';
 import { exportToPDF } from '@/lib/export';
 import {
     Plus, Search, LogOut, Pin, Trash2, Share2,
-    FileText, Command,
+    FileText, Command, History,
 } from 'lucide-react';
 import Cookies from 'js-cookie';
 import { disconnectSocket, emitTitleUpdate, subscribeToTitleUpdate, subscribeToConnectionState } from '@/lib/socket';
@@ -60,6 +61,7 @@ export default function Dashboard() {
     // Overlays
     const [isPaletteOpen, setIsPaletteOpen] = useState(false);
     const [isHelpOpen, setIsHelpOpen] = useState(false);
+    const [isHistoryOpen, setIsHistoryOpen] = useState(false);
 
     // init
     useEffect(() => {
@@ -217,6 +219,7 @@ export default function Dashboard() {
             { id: 'act:help', section: 'Actions', icon: 'keyboard', label: 'Keyboard shortcuts', hint: '⌘/', run: () => setIsHelpOpen(true) },
             ...(selectedNote ? [
                 { id: 'act:share', section: 'Actions' as const, icon: 'share' as const, label: 'Share current note', run: () => setIsShareModalOpen(true) },
+                { id: 'act:history', section: 'Actions' as const, icon: 'note' as const, label: 'Version history', run: () => setIsHistoryOpen(true) },
                 { id: 'act:pdf', section: 'Actions' as const, icon: 'export' as const, label: 'Export current note as PDF', run: () => exportToPDF('editor-content-target', `Note-${selectedNote.id}`) },
             ] : []),
             { id: 'act:logout', section: 'Actions', icon: 'logout', label: 'Sign out', run: logout },
@@ -394,6 +397,15 @@ export default function Dashboard() {
                         </button>
                         <button
                             type="button"
+                            onClick={() => selectedNote && setIsHistoryOpen(true)}
+                            disabled={!selectedNote}
+                            className="btn btn-ghost py-1 px-2 text-xs"
+                            title="Version history"
+                        >
+                            <History size={12} /> History
+                        </button>
+                        <button
+                            type="button"
                             onClick={() => selectedNote && setIsShareModalOpen(true)}
                             disabled={!selectedNote}
                             className="btn btn-ghost py-1 px-2 text-xs"
@@ -479,6 +491,17 @@ export default function Dashboard() {
             <KeyboardHelp
                 open={isHelpOpen}
                 onClose={() => setIsHelpOpen(false)}
+            />
+
+            <HistoryDrawer
+                open={isHistoryOpen}
+                noteId={selectedNote?.id || null}
+                onClose={() => setIsHistoryOpen(false)}
+                onRestored={(content, title) => {
+                    if (!selectedNote) return;
+                    setNotes(prev => prev.map(n => n.id === selectedNote.id ? { ...n, content, title: title || n.title } : n));
+                    setSelectedNote(prev => prev ? { ...prev, content, title: title || prev.title } : prev);
+                }}
             />
 
             {pendingDelete && (

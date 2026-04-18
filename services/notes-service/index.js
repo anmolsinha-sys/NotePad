@@ -131,6 +131,8 @@ app.post('/api/notes', protect, writeLimiter, notesController.createNote);
 app.patch('/api/notes/:id', protect, writeLimiter, notesController.updateNote);
 app.delete('/api/notes/:id', protect, writeLimiter, notesController.deleteNote);
 app.post('/api/notes/:id/invite', protect, writeLimiter, notesController.inviteCollaborator);
+app.get('/api/notes/:id/versions', protect, notesController.listVersions);
+app.post('/api/notes/:id/versions/:versionId/restore', protect, writeLimiter, notesController.restoreVersion);
 app.post('/api/upload', protect, writeLimiter, upload.single('image'), notesController.uploadImage);
 
 app.use((err, req, res, next) => {

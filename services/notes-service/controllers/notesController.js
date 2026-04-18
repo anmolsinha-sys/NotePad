@@ -8,6 +8,8 @@ cloudinary.config({
 
 const UPDATABLE_FIELDS = ['title', 'content', 'tags', 'is_pinned', 'is_public', 'type', 'language', 'images'];
 const MAX_CONTENT_BYTES = 1_500_000;
+const SNAPSHOT_INTERVAL_MS = 5 * 60 * 1000;
+const MAX_VERSIONS_PER_NOTE = 50;
 
 const pickUpdate = (body = {}) => {
     const out = {};
@@ -102,13 +104,49 @@ exports.getNote = async (req, res) => {
     }
 };
 
+const maybeSnapshot = async (supabase, note, userId) => {
+    try {
+        const { data: latest } = await supabase
+            .from('note_versions')
+            .select('created_at')
+            .eq('note_id', note.id)
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+
+        const shouldSnapshot = !latest || (Date.now() - new Date(latest.created_at).getTime()) > SNAPSHOT_INTERVAL_MS;
+        if (!shouldSnapshot) return;
+
+        await supabase.from('note_versions').insert([{
+            note_id: note.id,
+            content: note.content || '',
+            title: note.title || null,
+            created_by: userId,
+        }]);
+
+        // Trim beyond MAX_VERSIONS_PER_NOTE
+        const { data: extras } = await supabase
+            .from('note_versions')
+            .select('id')
+            .eq('note_id', note.id)
+            .order('created_at', { ascending: false })
+            .range(MAX_VERSIONS_PER_NOTE, MAX_VERSIONS_PER_NOTE + 500);
+        if (extras && extras.length > 0) {
+            await supabase.from('note_versions').delete().in('id', extras.map((v) => v.id));
+        }
+    } catch (err) {
+        console.error('[notes.snapshot]', err);
+        // Snapshot failures must not block saves.
+    }
+};
+
 exports.updateNote = async (req, res) => {
     try {
         const noteId = req.params.id;
 
         const { data: note, error: fetchError } = await req.supabase
             .from('notes')
-            .select('id, owner_id, collaborators')
+            .select('id, owner_id, collaborators, content, title')
             .eq('id', noteId)
             .single();
 
@@ -124,7 +162,6 @@ exports.updateNote = async (req, res) => {
 
         const updateData = pickUpdate(req.body);
 
-        // Only the owner can change sharing/pin state.
         if (!isOwner) {
             delete updateData.is_public;
             delete updateData.is_pinned;
@@ -136,6 +173,11 @@ exports.updateNote = async (req, res) => {
 
         if (Object.keys(updateData).length === 0) {
             return res.status(400).json({ status: 'fail', message: 'Nothing to update.' });
+        }
+
+        // Only snapshot when content changes
+        if (typeof updateData.content === 'string' && updateData.content !== note.content) {
+            await maybeSnapshot(req.supabase, note, req.user.id);
         }
 
         const { data: updatedNote, error: updateError } = await req.supabase
@@ -154,6 +196,97 @@ exports.updateNote = async (req, res) => {
     } catch (err) {
         console.error('[notes.update]', err);
         res.status(500).json({ status: 'fail', message: 'Could not update note.' });
+    }
+};
+
+exports.listVersions = async (req, res) => {
+    try {
+        const noteId = req.params.id;
+
+        const { data: note } = await req.supabase
+            .from('notes')
+            .select('id, owner_id, collaborators')
+            .eq('id', noteId)
+            .single();
+
+        if (!note) return res.status(404).json({ status: 'fail', message: 'Note not found.' });
+
+        const isOwner = note.owner_id === req.user.id;
+        const isCollaborator = Array.isArray(note.collaborators) && note.collaborators.includes(req.user.id);
+        if (!isOwner && !isCollaborator) {
+            return res.status(403).json({ status: 'fail', message: 'No access.' });
+        }
+
+        const { data: versions, error } = await req.supabase
+            .from('note_versions')
+            .select('id, content, title, created_at, created_by')
+            .eq('note_id', noteId)
+            .order('created_at', { ascending: false })
+            .limit(50);
+
+        if (error) {
+            console.error('[notes.listVersions]', error);
+            return res.status(400).json({ status: 'fail', message: 'Could not load history.' });
+        }
+
+        res.status(200).json({ status: 'success', results: versions.length, data: { versions } });
+    } catch (err) {
+        console.error('[notes.listVersions]', err);
+        res.status(500).json({ status: 'fail', message: 'Could not load history.' });
+    }
+};
+
+exports.restoreVersion = async (req, res) => {
+    try {
+        const { id: noteId, versionId } = req.params;
+
+        const { data: note } = await req.supabase
+            .from('notes')
+            .select('id, owner_id, collaborators, content, title')
+            .eq('id', noteId)
+            .single();
+
+        if (!note) return res.status(404).json({ status: 'fail', message: 'Note not found.' });
+
+        const isOwner = note.owner_id === req.user.id;
+        const isCollaborator = Array.isArray(note.collaborators) && note.collaborators.includes(req.user.id);
+        if (!isOwner && !isCollaborator) {
+            return res.status(403).json({ status: 'fail', message: 'No access.' });
+        }
+
+        const { data: version } = await req.supabase
+            .from('note_versions')
+            .select('content, title')
+            .eq('id', versionId)
+            .eq('note_id', noteId)
+            .single();
+
+        if (!version) return res.status(404).json({ status: 'fail', message: 'Version not found.' });
+
+        // Snapshot current state before restoring (so restore is reversible)
+        await req.supabase.from('note_versions').insert([{
+            note_id: noteId,
+            content: note.content || '',
+            title: note.title || null,
+            created_by: req.user.id,
+        }]);
+
+        const { data: updated, error: updateError } = await req.supabase
+            .from('notes')
+            .update({ content: version.content, title: version.title || note.title })
+            .eq('id', noteId)
+            .select()
+            .single();
+
+        if (updateError) {
+            console.error('[notes.restoreVersion]', updateError);
+            return res.status(400).json({ status: 'fail', message: 'Could not restore version.' });
+        }
+
+        res.status(200).json({ status: 'success', data: { note: updated } });
+    } catch (err) {
+        console.error('[notes.restoreVersion]', err);
+        res.status(500).json({ status: 'fail', message: 'Could not restore version.' });
     }
 };
 
