@@ -75,6 +75,10 @@ const TiptapEditor = ({
 
     const fileInputRef = useRef<HTMLInputElement>(null);
     const galleryInputRef = useRef<HTMLInputElement>(null);
+    const editorRef = useRef<any>(null);
+
+    const uploadOneRef = useRef<(file: File) => Promise<string | null>>(async () => null);
+    const handleDroppedImagesRef = useRef<(files: File[]) => Promise<void>>(async () => {});
 
     const saveNow = async (content: string, nextTags: string[]) => {
         if (!noteId || !editable) return;
@@ -112,6 +116,24 @@ const TiptapEditor = ({
         immediatelyRender: false,
         editorProps: {
             attributes: { class: 'focus:outline-none' },
+            handleDrop(_view, event) {
+                const dt = (event as DragEvent).dataTransfer;
+                if (!dt || dt.files.length === 0) return false;
+                const images = Array.from(dt.files).filter((f) => f.type.startsWith('image/'));
+                if (images.length === 0) return false;
+                event.preventDefault();
+                handleDroppedImagesRef.current(images);
+                return true;
+            },
+            handlePaste(_view, event) {
+                const dt = (event as ClipboardEvent).clipboardData;
+                if (!dt || dt.files.length === 0) return false;
+                const images = Array.from(dt.files).filter((f) => f.type.startsWith('image/'));
+                if (images.length === 0) return false;
+                event.preventDefault();
+                handleDroppedImagesRef.current(images);
+                return true;
+            },
         },
         onUpdate: ({ editor }) => {
             if (isApplyingRemoteUpdate.current) return;
@@ -133,8 +155,42 @@ const TiptapEditor = ({
     });
 
     useEffect(() => {
+        editorRef.current = editor;
         if (editor && editor.isEditable !== editable) editor.setEditable(editable);
     }, [editable, editor]);
+
+    useEffect(() => {
+        uploadOneRef.current = async (file: File) => {
+            const formData = new FormData();
+            formData.append('image', file);
+            try {
+                const res = await notesApi.uploadImage(formData);
+                return res.data?.data?.url || res.data?.url || null;
+            } catch (err: any) {
+                toast.error(err?.response?.data?.message || 'Image upload failed');
+                return null;
+            }
+        };
+        handleDroppedImagesRef.current = async (files: File[]) => {
+            const ed = editorRef.current;
+            if (!ed || files.length === 0) return;
+            const capped = files.slice(0, 4);
+            if (capped.length === 1) {
+                const url = await uploadOneRef.current(capped[0]);
+                if (url) ed.chain().focus().setImage({ src: url }).run();
+                return;
+            }
+            const results = await Promise.all(capped.map((f) => uploadOneRef.current(f)));
+            const items = results
+                .map((src, i) => (src ? { src, alt: capped[i]?.name || '' } : null))
+                .filter((x): x is { src: string; alt: string } => Boolean(x));
+            if (items.length === 1) {
+                ed.chain().focus().setImage({ src: items[0].src }).run();
+            } else if (items.length > 1) {
+                ed.chain().focus().insertGallery(items).run();
+            }
+        };
+    });
 
     useEffect(() => {
         return () => { if (autosaveTimer.current) clearTimeout(autosaveTimer.current); };
@@ -172,19 +228,28 @@ const TiptapEditor = ({
         if (fileInputRef.current) fileInputRef.current.value = '';
     };
 
-    const handleGalleryUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-        const files = Array.from(e.target.files || []).slice(0, 4);
-        if (files.length === 0 || !editor) return;
-        if (files.length === 1) {
-            const url = await uploadOne(files[0]);
+    const handleDroppedImages = async (files: File[]) => {
+        if (!editor || files.length === 0) return;
+        const capped = files.slice(0, 4);
+        if (capped.length === 1) {
+            const url = await uploadOne(capped[0]);
             if (url) editor.chain().focus().setImage({ src: url }).run();
-        } else {
-            const results = await Promise.all(files.map(uploadOne));
-            const items = results
-                .filter((u): u is string => Boolean(u))
-                .map((src, i) => ({ src, alt: files[i]?.name || '' }));
-            if (items.length > 0) editor.chain().focus().insertGallery(items).run();
+            return;
         }
+        const results = await Promise.all(capped.map(uploadOne));
+        const items = results
+            .map((src, i) => (src ? { src, alt: capped[i]?.name || '' } : null))
+            .filter((x): x is { src: string; alt: string } => Boolean(x));
+        if (items.length === 1) {
+            editor.chain().focus().setImage({ src: items[0].src }).run();
+        } else if (items.length > 1) {
+            editor.chain().focus().insertGallery(items).run();
+        }
+    };
+
+    const handleGalleryUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const files = Array.from(e.target.files || []);
+        await handleDroppedImages(files);
         if (galleryInputRef.current) galleryInputRef.current.value = '';
     };
 
