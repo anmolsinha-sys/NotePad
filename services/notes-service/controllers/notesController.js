@@ -21,12 +21,14 @@ const pickUpdate = (body = {}) => {
 
 const canRead = (note, user) => {
     const isOwner = Boolean(user && user.id === note.owner_id);
-    const isEditor = Boolean(user && Array.isArray(note.collaborators) && note.collaborators.includes(user.id));
     const isViewer = Boolean(user && Array.isArray(note.viewers) && note.viewers.includes(user.id));
+    const isEditor = Boolean(user && Array.isArray(note.collaborators) && note.collaborators.includes(user.id));
 
     if (isOwner) return { ok: true, canEdit: true };
-    if (isEditor) return { ok: true, canEdit: true };
+    // Viewer role is the more restrictive one — if a user is present on both
+    // arrays (legacy data), treat them as a viewer.
     if (isViewer) return { ok: true, canEdit: false };
+    if (isEditor) return { ok: true, canEdit: true };
     if (note.is_public) return { ok: true, canEdit: false };
     return { ok: false };
 };
@@ -411,23 +413,20 @@ exports.inviteCollaborator = async (req, res) => {
         const editors = Array.isArray(note.collaborators) ? note.collaborators : [];
         const viewers = Array.isArray(note.viewers) ? note.viewers : [];
 
-        const targetArray = role === 'viewer' ? viewers : editors;
-        const otherArray = role === 'viewer' ? editors : viewers;
-
-        // If already on the target list, no-op
-        if (targetArray.includes(invitee.id)) {
-            return res.status(200).json({ status: 'success', message: `Already a ${role}.` });
-        }
-
-        // Move across if currently on the other list (role change)
+        // Always dedup + move: the invitee should appear in exactly one of the two arrays,
+        // matching the requested role, regardless of legacy state.
         const update = {};
+        const strippedEditors = editors.filter((id) => id !== invitee.id);
+        const strippedViewers = viewers.filter((id) => id !== invitee.id);
         if (role === 'viewer') {
-            update.viewers = [...viewers, invitee.id];
-            update.collaborators = editors.filter((id) => id !== invitee.id);
+            update.viewers = [...strippedViewers, invitee.id];
+            update.collaborators = strippedEditors;
         } else {
-            update.collaborators = [...editors, invitee.id];
-            update.viewers = viewers.filter((id) => id !== invitee.id);
+            update.collaborators = [...strippedEditors, invitee.id];
+            update.viewers = strippedViewers;
         }
+
+        const alreadyInRole = (role === 'viewer' ? viewers : editors).includes(invitee.id);
 
         const { error: updateError } = await req.supabase
             .from('notes')
@@ -443,6 +442,7 @@ exports.inviteCollaborator = async (req, res) => {
             status: 'success',
             data: {
                 role,
+                alreadyInRole,
                 user: { id: invitee.id, email: invitee.email, username: invitee.username },
             },
         });
