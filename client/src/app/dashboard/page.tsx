@@ -9,6 +9,10 @@ import CommandPalette, { type PaletteItem } from '@/components/CommandPalette';
 import KeyboardHelp from '@/components/KeyboardHelp';
 import HistoryDrawer from '@/components/HistoryDrawer';
 import SettingsPanel from '@/components/SettingsPanel';
+import StreakHeatmap from '@/components/StreakHeatmap';
+import BacklinksPanel from '@/components/BacklinksPanel';
+import GraphView from '@/components/GraphView';
+import { setWikilinkNotes } from '@/lib/wikilink-state';
 import { exportToPDF } from '@/lib/export';
 import { htmlToMarkdown, markdownToHtml, downloadMarkdown } from '@/lib/markdown';
 import {
@@ -66,6 +70,7 @@ export default function Dashboard() {
     const [isHistoryOpen, setIsHistoryOpen] = useState(false);
     const [focusMode, setFocusMode] = useState(false);
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+    const [isGraphOpen, setIsGraphOpen] = useState(false);
     const [typewriter, setTypewriter] = useState(false);
 
     useEffect(() => {
@@ -119,6 +124,28 @@ export default function Dashboard() {
     }, [selectedNote?.id]);
 
     useEffect(() => () => disconnectSocket(), []);
+
+    // Feed wikilink suggestion with current notes
+    useEffect(() => {
+        setWikilinkNotes(notes.map((n) => ({
+            id: n.id,
+            title: n.title || 'Untitled',
+            content: n.content,
+            updated_at: n.updated_at,
+        })));
+    }, [notes]);
+
+    // Handle wikilink clicks: jump to that note
+    useEffect(() => {
+        const onOpen = (e: Event) => {
+            const id = (e as CustomEvent).detail?.target;
+            if (!id) return;
+            const target = notes.find((n) => n.id === id);
+            if (target) setSelectedNote(target);
+        };
+        document.addEventListener('wikilink:open', onOpen);
+        return () => document.removeEventListener('wikilink:open', onOpen);
+    }, [notes]);
 
     // actions
     const createNote = useCallback(async () => {
@@ -224,6 +251,9 @@ export default function Dashboard() {
             } else if (mod && e.key === '.') {
                 e.preventDefault();
                 setFocusMode((v) => !v);
+            } else if (mod && e.shiftKey && e.key.toLowerCase() === 'g') {
+                e.preventDefault();
+                setIsGraphOpen((v) => !v);
             } else if (e.key === 'Escape' && focusMode) {
                 setFocusMode(false);
             }
@@ -273,6 +303,7 @@ export default function Dashboard() {
         const items: PaletteItem[] = [
             { id: 'act:new', section: 'Actions', icon: 'plus', label: 'New note', hint: '⌘N', run: createNote },
             { id: 'act:help', section: 'Actions', icon: 'keyboard', label: 'Keyboard shortcuts', hint: '⌘/', run: () => setIsHelpOpen(true) },
+            { id: 'act:graph', section: 'Actions', icon: 'note', label: 'Open graph view', hint: '⌘⇧G', run: () => setIsGraphOpen(true) },
             ...(selectedNote ? [
                 { id: 'act:share', section: 'Actions' as const, icon: 'share' as const, label: 'Share current note', run: () => setIsShareModalOpen(true) },
                 { id: 'act:history', section: 'Actions' as const, icon: 'note' as const, label: 'Version history', run: () => setIsHistoryOpen(true) },
@@ -355,6 +386,8 @@ export default function Dashboard() {
                         />
                     </div>
                 </div>
+
+                <StreakHeatmap notes={notes} />
 
                 {/* Notes list */}
                 <div className="flex-1 overflow-y-auto px-1 py-2">
@@ -535,6 +568,14 @@ export default function Dashboard() {
                                 }}
                                 onCollaboratorsChange={setCollaboratorCount}
                             />
+                            <BacklinksPanel
+                                notes={notes}
+                                currentNoteId={selectedNote.id}
+                                onOpen={(id) => {
+                                    const target = notes.find((n) => n.id === id);
+                                    if (target) setSelectedNote(target);
+                                }}
+                            />
                         </div>
                     ) : (
                         <div className="h-full flex flex-col items-center justify-center gap-3">
@@ -605,6 +646,16 @@ export default function Dashboard() {
                     if (!selectedNote) return;
                     setNotes(prev => prev.map(n => n.id === selectedNote.id ? { ...n, content, title: title || n.title } : n));
                     setSelectedNote(prev => prev ? { ...prev, content, title: title || prev.title } : prev);
+                }}
+            />
+
+            <GraphView
+                open={isGraphOpen}
+                notes={notes}
+                onClose={() => setIsGraphOpen(false)}
+                onOpenNote={(id) => {
+                    const target = notes.find((n) => n.id === id);
+                    if (target) setSelectedNote(target);
                 }}
             />
 

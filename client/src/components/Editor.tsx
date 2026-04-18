@@ -12,7 +12,9 @@ import Placeholder from '@tiptap/extension-placeholder';
 import { Mermaid } from '@/lib/mermaid-extension';
 import { SlashCommands } from '@/lib/slash-commands';
 import { SmartSnippets } from '@/lib/smart-snippets';
+import { Wikilink } from '@/lib/wikilink';
 import { ImageGallery } from '@/lib/image-gallery';
+import { navigateToNote } from '@/lib/wikilink-state';
 import { useState, useEffect, useRef } from 'react';
 import {
     Bold, Italic, List, ListOrdered,
@@ -114,12 +116,24 @@ const TiptapEditor = ({
             ImageGallery,
             SlashCommands,
             SmartSnippets,
+            Wikilink,
         ],
         content: initialContent,
         editable,
         immediatelyRender: false,
         editorProps: {
             attributes: { class: 'focus:outline-none' },
+            handleClick(_view, _pos, event) {
+                const target = event.target as HTMLElement;
+                const wl = target.closest('a[data-type="wikilink"]') as HTMLAnchorElement | null;
+                if (wl) {
+                    event.preventDefault();
+                    const id = wl.getAttribute('data-target');
+                    if (id) navigateToNote(id);
+                    return true;
+                }
+                return false;
+            },
             handleDrop(_view, event) {
                 if (!editorRef.current?.isEditable) return true;
                 const dt = (event as DragEvent).dataTransfer;

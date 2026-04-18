@@ -277,6 +277,20 @@
   text-decoration: underline;
   text-underline-offset: 2px;
 }
+.ProseMirror a.wikilink {
+  color: var(--accent-strong);
+  background: var(--accent-weak);
+  border: 1px solid color-mix(in oklab, var(--accent) 30%, transparent);
+  border-radius: var(--radius-xs);
+  padding: 0 4px;
+  font-size: 0.85em;
+  text-decoration: none;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.ProseMirror a.wikilink:hover {
+  background: color-mix(in oklab, var(--accent) 24%, transparent);
+}
 
 /* Editor root must be positioned so free-mode images anchor to it */
 #editor-content-target { position: relative; min-height: 60vh; }
