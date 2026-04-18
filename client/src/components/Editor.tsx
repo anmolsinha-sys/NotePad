@@ -10,6 +10,7 @@ import Image from '@tiptap/extension-image';
 import ImageResize from 'tiptap-extension-resize-image';
 import Placeholder from '@tiptap/extension-placeholder';
 import { Mermaid } from '@/lib/mermaid-extension';
+import { SlashCommands } from '@/lib/slash-commands';
 import { useState, useEffect, useRef } from 'react';
 import {
     Bold, Italic, List, ListOrdered,
@@ -98,9 +99,10 @@ const TiptapEditor = ({
             Highlight.configure({ multicolor: true }),
             CodeBlockLowlight.configure({ lowlight }),
             Mermaid,
-            Placeholder.configure({ placeholder: 'Start typing. Use markdown shortcuts or the toolbar.' }),
+            Placeholder.configure({ placeholder: "Start typing. '/' for commands." }),
             Image,
             ImageResize,
+            SlashCommands,
         ],
         content: initialContent,
         editable,
@@ -133,6 +135,13 @@ const TiptapEditor = ({
 
     useEffect(() => {
         return () => { if (autosaveTimer.current) clearTimeout(autosaveTimer.current); };
+    }, []);
+
+    // Slash-menu -> open image picker
+    useEffect(() => {
+        const openPicker = () => fileInputRef.current?.click();
+        document.addEventListener('editor:open-image-picker', openPicker);
+        return () => document.removeEventListener('editor:open-image-picker', openPicker);
     }, []);
 
     const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {

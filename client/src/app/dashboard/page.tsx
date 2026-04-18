@@ -5,6 +5,9 @@ import { useRouter } from 'next/navigation';
 import { notesApi, authApi } from '@/lib/api';
 import TiptapEditor from '@/components/Editor';
 import ShareModal from '@/components/ShareModal';
+import CommandPalette, { type PaletteItem } from '@/components/CommandPalette';
+import KeyboardHelp from '@/components/KeyboardHelp';
+import { exportToPDF } from '@/lib/export';
 import {
     Plus, Search, LogOut, Pin, Trash2, Share2,
     FileText, Command,
@@ -53,6 +56,10 @@ export default function Dashboard() {
     const [connectionState, setConnectionState] = useState<string>('disconnected');
     const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
     const [collaboratorCount, setCollaboratorCount] = useState<number>(0);
+
+    // Overlays
+    const [isPaletteOpen, setIsPaletteOpen] = useState(false);
+    const [isHelpOpen, setIsHelpOpen] = useState(false);
 
     // init
     useEffect(() => {
@@ -184,17 +191,57 @@ export default function Dashboard() {
 
     const allTags: string[] = Array.from(new Set(notes.flatMap(n => n.tags || [])));
 
-    // keyboard: ⌘/Ctrl + N for new note
+    // Global keybindings
     useEffect(() => {
         const onKey = (e: KeyboardEvent) => {
-            if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'n' && !e.shiftKey) {
+            const mod = e.metaKey || e.ctrlKey;
+            if (mod && e.key.toLowerCase() === 'k') {
+                e.preventDefault();
+                setIsPaletteOpen((v) => !v);
+            } else if (mod && e.key.toLowerCase() === 'n' && !e.shiftKey) {
                 e.preventDefault();
                 createNote();
+            } else if (mod && e.key === '/') {
+                e.preventDefault();
+                setIsHelpOpen((v) => !v);
             }
         };
         window.addEventListener('keydown', onKey);
         return () => window.removeEventListener('keydown', onKey);
     }, [createNote]);
+
+    // Palette items
+    const paletteItems: PaletteItem[] = (() => {
+        const items: PaletteItem[] = [
+            { id: 'act:new', section: 'Actions', icon: 'plus', label: 'New note', hint: '⌘N', run: createNote },
+            { id: 'act:help', section: 'Actions', icon: 'keyboard', label: 'Keyboard shortcuts', hint: '⌘/', run: () => setIsHelpOpen(true) },
+            ...(selectedNote ? [
+                { id: 'act:share', section: 'Actions' as const, icon: 'share' as const, label: 'Share current note', run: () => setIsShareModalOpen(true) },
+                { id: 'act:pdf', section: 'Actions' as const, icon: 'export' as const, label: 'Export current note as PDF', run: () => exportToPDF('editor-content-target', `Note-${selectedNote.id}`) },
+            ] : []),
+            { id: 'act:logout', section: 'Actions', icon: 'logout', label: 'Sign out', run: logout },
+        ];
+        for (const n of notes) {
+            items.push({
+                id: `note:${n.id}`,
+                section: 'Notes',
+                icon: 'note',
+                label: n.title || 'Untitled',
+                hint: relativeDate(n.updated_at),
+                run: () => setSelectedNote(n),
+            });
+        }
+        for (const t of allTags) {
+            items.push({
+                id: `tag:${t}`,
+                section: 'Tags',
+                icon: 'tag',
+                label: `#${t}`,
+                run: () => setActiveTag(activeTag === t ? null : t),
+            });
+        }
+        return items;
+    })();
 
     if (loading) {
         return (
@@ -337,7 +384,14 @@ export default function Dashboard() {
                     ) : <div />}
 
                     <div className="flex items-center gap-1.5">
-                        <span className="kbd hidden md:inline-flex"><Command size={9} className="mr-0.5" /> K</span>
+                        <button
+                            type="button"
+                            onClick={() => setIsPaletteOpen(true)}
+                            className="btn btn-ghost py-1 px-2 text-xs"
+                            title="Command palette (⌘K)"
+                        >
+                            <Command size={11} /> <span className="kbd hidden md:inline-flex">K</span>
+                        </button>
                         <button
                             type="button"
                             onClick={() => selectedNote && setIsShareModalOpen(true)}
@@ -415,6 +469,17 @@ export default function Dashboard() {
                     onPublicChange={handlePublicChange}
                 />
             )}
+
+            <CommandPalette
+                open={isPaletteOpen}
+                onClose={() => setIsPaletteOpen(false)}
+                items={paletteItems}
+            />
+
+            <KeyboardHelp
+                open={isHelpOpen}
+                onClose={() => setIsHelpOpen(false)}
+            />
 
             {pendingDelete && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
