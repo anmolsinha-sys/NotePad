@@ -22,6 +22,11 @@ export default function SettingsPanel({
     const [danger, setDanger] = useState(false);
     const [origin, setOrigin] = useState<string>('');
     const bookmarkletRef = useRef<HTMLAnchorElement>(null);
+    const [copied, setCopied] = useState(false);
+
+    const bookmarkletUrl = origin
+        ? `javascript:(function(){var s=getSelection().toString();var u=location.href;var t=document.title;window.open('${origin}/clip?t='+encodeURIComponent(t)+'&u='+encodeURIComponent(u)+'&s='+encodeURIComponent(s),'_blank');})();`
+        : '';
 
     useEffect(() => {
         setModeState(getStoredMode());
@@ -30,11 +35,31 @@ export default function SettingsPanel({
     }, []);
 
     useEffect(() => {
-        if (!origin || !bookmarkletRef.current) return;
-        const href = `javascript:(function(){var s=getSelection().toString();var u=location.href;var t=document.title;window.open('${origin}/clip?t='+encodeURIComponent(t)+'&u='+encodeURIComponent(u)+'&s='+encodeURIComponent(s),'_blank')})();`;
+        if (!bookmarkletUrl || !bookmarkletRef.current) return;
         // React blocks javascript: URLs via the href prop — set via DOM instead.
-        bookmarkletRef.current.setAttribute('href', href);
-    }, [origin]);
+        bookmarkletRef.current.setAttribute('href', bookmarkletUrl);
+    }, [bookmarkletUrl]);
+
+    const copyBookmarklet = async () => {
+        if (!bookmarkletUrl) return;
+        try {
+            await navigator.clipboard.writeText(bookmarkletUrl);
+            setCopied(true);
+            toast.success('Bookmarklet URL copied. Paste it as a new bookmark.');
+            setTimeout(() => setCopied(false), 2500);
+        } catch {
+            toast.error('Could not copy. Drag the link to your bookmarks bar instead.');
+        }
+    };
+
+    const testClipper = () => {
+        if (!origin) return;
+        const title = document.title || 'Test clip';
+        const sel = (typeof window !== 'undefined' && window.getSelection?.()?.toString()) || 'Test selection from this page.';
+        const url = typeof window !== 'undefined' ? window.location.href : '';
+        const dest = `${origin}/clip?t=${encodeURIComponent(title)}&u=${encodeURIComponent(url)}&s=${encodeURIComponent(sel)}`;
+        window.open(dest, '_blank');
+    };
 
     const handleMode = (m: ThemeMode) => {
         setModeState(m);
@@ -145,25 +170,45 @@ export default function SettingsPanel({
                     Drag this to your bookmarks bar. Click it on any page to save the selection as a note.
                 </p>
                 {origin && (
-                    <a
-                        ref={bookmarkletRef}
-                        onClick={(e) => e.preventDefault()}
-                        className="block px-2 py-1 rounded-xs text-[11px] font-mono text-center"
-                        style={{
-                            background: 'var(--accent-weak)',
-                            color: 'var(--accent-strong)',
-                            border: '1px solid color-mix(in oklab, var(--accent) 30%, transparent)',
-                            cursor: 'grab',
-                        }}
-                        draggable
-                        title="Drag this to your bookmarks bar"
-                    >
-                        + Clip to Notepad
-                    </a>
+                    <>
+                        <a
+                            ref={bookmarkletRef}
+                            onClick={(e) => e.preventDefault()}
+                            className="block px-2 py-1 rounded-xs text-[11px] font-mono text-center"
+                            style={{
+                                background: 'var(--accent-weak)',
+                                color: 'var(--accent-strong)',
+                                border: '1px solid color-mix(in oklab, var(--accent) 30%, transparent)',
+                                cursor: 'grab',
+                            }}
+                            draggable
+                            title="Drag this to your bookmarks bar"
+                        >
+                            + Clip to Notepad
+                        </a>
+                        <div className="flex gap-1.5 mt-1.5">
+                            <button
+                                type="button"
+                                onClick={copyBookmarklet}
+                                className="btn btn-ghost text-[11px] flex-1 py-1"
+                            >
+                                {copied ? 'Copied ✓' : 'Copy URL'}
+                            </button>
+                            <button
+                                type="button"
+                                onClick={testClipper}
+                                className="btn btn-ghost text-[11px] flex-1 py-1"
+                            >
+                                Test
+                            </button>
+                        </div>
+                        <p className="text-[10px] mt-1.5" style={{ color: 'var(--fg-dim)' }}>
+                            <strong>How:</strong> drag the link above to your bookmarks bar.
+                            If dragging doesn&rsquo;t work (some browsers block it), click
+                            <em> Copy URL</em> and paste it as the URL of a new bookmark.
+                        </p>
+                    </>
                 )}
-                <p className="text-[10px] mt-1" style={{ color: 'var(--fg-dim)' }}>
-                    Can't drag? Right-click the link and choose &ldquo;Copy link&rdquo;, then add a bookmark with that URL.
-                </p>
             </div>
 
             <div className="h-px" style={{ background: 'var(--border)' }} />
