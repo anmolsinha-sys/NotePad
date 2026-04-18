@@ -274,9 +274,25 @@
   border: 1px solid var(--border);
   max-width: 100%;
   height: auto;
-  display: block;
-  margin: 1rem 0;
+  display: inline-block;
+  margin: 0.25rem 0;
+  cursor: grab;
 }
+.ProseMirror img:active { cursor: grabbing; }
+
+/* tiptap-extension-resize-image wrappers — dark-theme polish */
+.ProseMirror [style*="display: inline-block"] > img,
+.ProseMirror .resize-image {
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+}
+.ProseMirror .ProseMirror-selectednode img {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+/* Clear after floated images so the next block sits below the row */
+.ProseMirror p { clear: none; }
+.ProseMirror h1, .ProseMirror h2, .ProseMirror h3, .ProseMirror hr { clear: both; }
 
 /* Code highlighting — dim palette that fits the theme */
 .hljs-keyword, .hljs-selector-tag, .hljs-title, .hljs-section { color: #c084fc; }

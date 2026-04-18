@@ -6,7 +6,7 @@ import Highlight from '@tiptap/extension-highlight';
 import Underline from '@tiptap/extension-underline';
 import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight';
 import { common, createLowlight } from 'lowlight';
-import Image from '@tiptap/extension-image';
+import '@tiptap/extension-image';
 import ImageResize from 'tiptap-extension-resize-image';
 import Placeholder from '@tiptap/extension-placeholder';
 import { Mermaid } from '@/lib/mermaid-extension';
@@ -106,8 +106,9 @@ const TiptapEditor = ({
             CodeBlockLowlight.configure({ lowlight }),
             Mermaid,
             Placeholder.configure({ placeholder: "Start typing. '/' for commands." }),
-            Image,
-            ImageResize,
+            ImageResize.extend({ draggable: true }).configure({
+                inline: true,
+            }),
             ImageGallery,
             SlashCommands,
         ],
