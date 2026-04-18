@@ -171,7 +171,7 @@ exports.updateNote = async (req, res) => {
             delete updateData.is_pinned;
         }
 
-        if (typeof updateData.content === 'string' && updateData.content.length > MAX_CONTENT_BYTES) {
+        if (typeof updateData.content === 'string' && Buffer.byteLength(updateData.content, 'utf8') > MAX_CONTENT_BYTES) {
             return res.status(413).json({ status: 'fail', message: 'Note is too large. Split it up.' });
         }
 
@@ -452,69 +452,135 @@ exports.inviteCollaborator = async (req, res) => {
     }
 };
 
-exports.urlMeta = async (req, res) => {
-    try {
-        const raw = (req.query.url || '').toString();
-        if (!raw) return res.status(400).json({ status: 'fail', message: 'url is required' });
+// ─── SSRF guard ───────────────────────────────────────────────────────────
+const dns = require('dns');
+const net = require('net');
+const { promisify } = require('util');
+const dnsLookup = promisify(dns.lookup);
 
-        let parsed;
-        try {
-            parsed = new URL(raw);
-        } catch {
-            return res.status(400).json({ status: 'fail', message: 'invalid url' });
-        }
+const isPrivateIPv4 = (ip) => {
+    const parts = ip.split('.').map(Number);
+    if (parts.length !== 4 || parts.some((p) => Number.isNaN(p))) return true;
+    const [a, b] = parts;
+    if (a === 10) return true;
+    if (a === 172 && b >= 16 && b <= 31) return true;
+    if (a === 192 && b === 168) return true;
+    if (a === 127) return true;                 // loopback
+    if (a === 169 && b === 254) return true;    // link-local (AWS/GCP metadata)
+    if (a === 0) return true;                    // this network
+    if (a >= 224) return true;                   // multicast, reserved
+    return false;
+};
+
+const isPrivateIPv6 = (ip) => {
+    const lower = ip.toLowerCase();
+    if (lower === '::1') return true;
+    if (lower.startsWith('fe80:')) return true;  // link-local
+    if (lower.startsWith('fc') || lower.startsWith('fd')) return true; // unique-local
+    if (lower.startsWith('::ffff:')) {
+        const mapped = lower.slice('::ffff:'.length);
+        if (net.isIPv4(mapped)) return isPrivateIPv4(mapped);
+    }
+    return false;
+};
+
+const resolveAndCheck = async (hostname) => {
+    const { address, family } = await dnsLookup(hostname);
+    const isPrivate = family === 4 ? isPrivateIPv4(address) : isPrivateIPv6(address);
+    return { address, isPrivate };
+};
+
+const MAX_REDIRECTS = 2;
+const FETCH_TIMEOUT_MS = 4000;
+const MAX_BYTES = 256 * 1024;
+
+const safeFetch = async (rawUrl) => {
+    let url = rawUrl;
+    for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+        const parsed = new URL(url);
         if (!['http:', 'https:'].includes(parsed.protocol)) {
-            return res.status(400).json({ status: 'fail', message: 'unsupported protocol' });
+            const e = new Error('unsupported protocol');
+            e.code = 'BAD_PROTOCOL';
+            throw e;
+        }
+        const { address, isPrivate } = await resolveAndCheck(parsed.hostname);
+        if (isPrivate) {
+            const e = new Error(`private address rejected: ${address}`);
+            e.code = 'PRIVATE_ADDR';
+            throw e;
         }
 
         const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), 5000);
-        try {
-            const resp = await fetch(parsed.toString(), {
-                signal: controller.signal,
-                headers: {
-                    'User-Agent': 'NotepadURLMeta/1.0 (+https://github.com/anmolsinha-sys/NotePad)',
-                    Accept: 'text/html,application/xhtml+xml',
-                },
-                redirect: 'follow',
-            });
-            clearTimeout(timer);
+        const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+        const resp = await fetch(parsed.toString(), {
+            signal: controller.signal,
+            headers: {
+                'User-Agent': 'NotepadURLMeta/1.0 (+https://github.com/anmolsinha-sys/NotePad)',
+                Accept: 'text/html,application/xhtml+xml',
+            },
+            redirect: 'manual',
+        }).finally(() => clearTimeout(timer));
 
-            if (!resp.ok) return res.status(200).json({ status: 'success', data: { title: null, url: parsed.toString() } });
-
-            const contentType = resp.headers.get('content-type') || '';
-            if (!contentType.includes('text/html') && !contentType.includes('xhtml')) {
-                return res.status(200).json({ status: 'success', data: { title: null, url: parsed.toString() } });
-            }
-
-            // Read at most 256KB to find the <title>
-            const reader = resp.body?.getReader();
-            if (!reader) return res.status(200).json({ status: 'success', data: { title: null, url: parsed.toString() } });
-
-            const decoder = new TextDecoder();
-            let buffer = '';
-            let received = 0;
-            const MAX = 256 * 1024;
-            while (true) {
-                const { done, value } = await reader.read();
-                if (done) break;
-                received += value.length;
-                buffer += decoder.decode(value, { stream: true });
-                if (received >= MAX) break;
-                if (/<\/title>/i.test(buffer)) break;
-            }
-            try { reader.cancel(); } catch {}
-
-            const titleMatch = buffer.match(/<title[^>]*>([^<]*)<\/title>/i);
-            const ogTitleMatch = buffer.match(/<meta[^>]*property=["']og:title["'][^>]*content=["']([^"']+)["'][^>]*>/i);
-            const title = ((ogTitleMatch && ogTitleMatch[1]) || (titleMatch && titleMatch[1]) || '').trim().slice(0, 200);
-
-            res.status(200).json({ status: 'success', data: { title: title || null, url: parsed.toString() } });
-        } catch (err) {
-            clearTimeout(timer);
-            console.error('[notes.urlMeta]', err);
-            res.status(200).json({ status: 'success', data: { title: null, url: parsed.toString() } });
+        if (resp.status >= 300 && resp.status < 400) {
+            const next = resp.headers.get('location');
+            if (!next) return resp;
+            url = new URL(next, parsed).toString();
+            continue;
         }
+        return resp;
+    }
+    const e = new Error('too many redirects');
+    e.code = 'REDIRECT_LIMIT';
+    throw e;
+};
+
+exports.urlMeta = async (req, res) => {
+    try {
+        const raw = (req.query.url || '').toString().trim();
+        if (!raw) return res.status(400).json({ status: 'fail', message: 'url is required' });
+
+        let resp;
+        let finalUrl = raw;
+        try {
+            resp = await safeFetch(raw);
+            finalUrl = resp.url || raw;
+        } catch (err) {
+            if (err && (err.code === 'PRIVATE_ADDR' || err.code === 'BAD_PROTOCOL')) {
+                return res.status(400).json({ status: 'fail', message: 'That URL is not fetchable.' });
+            }
+            return res.status(200).json({ status: 'success', data: { title: null, url: raw } });
+        }
+
+        if (!resp.ok) {
+            return res.status(200).json({ status: 'success', data: { title: null, url: finalUrl } });
+        }
+
+        const contentType = resp.headers.get('content-type') || '';
+        if (!contentType.includes('text/html') && !contentType.includes('xhtml')) {
+            return res.status(200).json({ status: 'success', data: { title: null, url: finalUrl } });
+        }
+
+        const reader = resp.body && resp.body.getReader && resp.body.getReader();
+        if (!reader) return res.status(200).json({ status: 'success', data: { title: null, url: finalUrl } });
+
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let received = 0;
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            received += value.length;
+            buffer += decoder.decode(value, { stream: true });
+            if (received >= MAX_BYTES) break;
+            if (/<\/title>/i.test(buffer)) break;
+        }
+        try { reader.cancel(); } catch {}
+
+        const titleMatch = buffer.match(/<title[^>]*>([^<]*)<\/title>/i);
+        const ogTitleMatch = buffer.match(/<meta[^>]*property=["']og:title["'][^>]*content=["']([^"']+)["'][^>]*>/i);
+        const title = ((ogTitleMatch && ogTitleMatch[1]) || (titleMatch && titleMatch[1]) || '').trim().slice(0, 200);
+
+        res.status(200).json({ status: 'success', data: { title: title || null, url: finalUrl } });
     } catch (err) {
         console.error('[notes.urlMeta]', err);
         res.status(500).json({ status: 'fail', message: 'Could not fetch metadata.' });

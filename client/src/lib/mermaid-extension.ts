@@ -1,5 +1,6 @@
 import { Node, mergeAttributes } from '@tiptap/core';
 import mermaid from 'mermaid';
+import DOMPurify from 'dompurify';
 
 export const Mermaid = Node.create({
     name: 'mermaid',
@@ -44,7 +45,11 @@ export const Mermaid = Node.create({
                 const currentContent = contentToRender || node.attrs.content;
                 try {
                     const { svg } = await mermaid.render(id, currentContent);
-                    renderContainer.innerHTML = svg;
+                    renderContainer.innerHTML = DOMPurify.sanitize(svg, {
+                        USE_PROFILES: { svg: true, svgFilters: true },
+                        FORBID_TAGS: ['script', 'foreignObject'],
+                        FORBID_ATTR: ['onerror', 'onload', 'onclick'],
+                    });
                     const svgEl = renderContainer.querySelector('svg');
                     if (svgEl) {
                         svgEl.style.maxWidth = '100%';

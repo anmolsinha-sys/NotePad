@@ -6,6 +6,7 @@ import { formatDistanceToNow, parseISO, format } from 'date-fns';
 import { X, RotateCcw, History } from 'lucide-react';
 import { toast } from 'sonner';
 import { diff_match_patch } from 'diff-match-patch';
+import DOMPurify from 'dompurify';
 
 const dmp = new diff_match_patch();
 
@@ -214,7 +215,7 @@ export default function HistoryDrawer({
                                     {view === 'preview' ? (
                                         <div
                                             style={{ color: 'var(--fg-muted)' }}
-                                            dangerouslySetInnerHTML={{ __html: selected.content }}
+                                            dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(selected.content) }}
                                         />
                                     ) : (
                                         <DiffView before={selected.content} after={currentContent || ''} />

@@ -1,4 +1,5 @@
 import { toast } from 'sonner';
+import DOMPurify from 'dompurify';
 
 const PRINT_STYLES = `
 :root {
@@ -110,8 +111,13 @@ header.meta .sub {
 `;
 
 const stripControlChrome = (html: string): string => {
-    // Remove editor tooling / resize handles / html2canvas-ignore blocks
-    const doc = new DOMParser().parseFromString(`<div>${html}</div>`, 'text/html');
+    // First sanitize — keep structural HTML tags/attributes but drop scripts / event handlers.
+    const sanitized = DOMPurify.sanitize(html, {
+        ALLOWED_ATTR: ['href', 'src', 'alt', 'title', 'class', 'data-target', 'data-align', 'data-mode', 'colspan', 'rowspan', 'style'],
+        FORBID_TAGS: ['script', 'iframe', 'object', 'embed', 'form', 'input', 'link', 'meta'],
+        FORBID_ATTR: ['onerror', 'onload', 'onclick', 'onfocus', 'onblur', 'onmouseover', 'onmouseout', 'formaction'],
+    });
+    const doc = new DOMParser().parseFromString(`<div>${sanitized}</div>`, 'text/html');
     doc.querySelectorAll('[data-html2canvas-ignore], .flex-image-resizer').forEach((el) => el.remove());
     doc.querySelectorAll('.flex-image-wrap').forEach((el) => {
         // Strip absolute positioning so images land naturally in the printout
@@ -120,7 +126,7 @@ const stripControlChrome = (html: string): string => {
         (el as HTMLElement).style.top = 'auto';
         (el as HTMLElement).classList.remove('mode-free');
     });
-    return doc.body.firstElementChild?.innerHTML || html;
+    return doc.body.firstElementChild?.innerHTML || sanitized;
 };
 
 const escapeHtml = (s: string): string =>

@@ -50,8 +50,8 @@ exports.signup = async (req, res) => {
             console.error('[auth.signup]', error);
             const msg = (error.message || '').toLowerCase();
             if (msg.includes('duplicate') || msg.includes('unique')) {
-                const field = msg.includes('username') ? 'username' : 'email';
-                return res.status(409).json({ status: 'fail', message: `That ${field} is already taken.` });
+                // Don't reveal which field collided — prevents account enumeration.
+                return res.status(409).json({ status: 'fail', message: 'That username or email is already in use.' });
             }
             return res.status(400).json({ status: 'fail', message: 'Signup failed. Please try again.' });
         }

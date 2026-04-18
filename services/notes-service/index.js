@@ -41,6 +41,14 @@ const writeLimiter = rateLimit({
     message: { status: 'fail', message: 'Too many requests. Slow down for a moment.' },
 });
 
+const urlMetaLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 15,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { status: 'fail', message: 'Too many metadata requests. Slow down for a moment.' },
+});
+
 // Attach supabase to request
 // Optional Auth Middleware for public routes that might still benefit from knowing the user
 const optionalProtect = async (req, res, next) => {
@@ -124,7 +132,7 @@ const upload = multer({
 });
 
 app.get('/health', (req, res) => res.json({ status: 'ok' }));
-app.get('/api/url-meta', protect, notesController.urlMeta);
+app.get('/api/url-meta', protect, urlMetaLimiter, notesController.urlMeta);
 app.get('/api/notes', protect, notesController.getNotes);
 app.get('/api/notes/search', protect, notesController.searchNotes);
 app.get('/api/notes/:id', optionalProtect, notesController.getNote);

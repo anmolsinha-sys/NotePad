@@ -1,4 +1,5 @@
 import { io, Socket } from 'socket.io-client';
+import Cookies from 'js-cookie';
 
 const SOCKET_URL = process.env.NEXT_PUBLIC_LIVE_URL || 'http://localhost:5003';
 
@@ -24,16 +25,23 @@ export const subscribeToConnectionState = (cb: (state: ConnectionState) => void)
 export const initiateSocketConnection = () => {
     if (!socket) {
         notifyState('connecting');
+        const token = Cookies.get('token') || '';
         socket = io(SOCKET_URL, {
             reconnection: true,
             reconnectionAttempts: Infinity,
             reconnectionDelay: 500,
             reconnectionDelayMax: 5000,
             timeout: 10000,
+            auth: { token },
         });
 
         socket.on('connect', () => notifyState('connected'));
-        socket.io.on('reconnect_attempt', () => notifyState('reconnecting'));
+        socket.io.on('reconnect_attempt', () => {
+            notifyState('reconnecting');
+            // Refresh token on each reconnect attempt — handles post-login resume
+            const fresh = Cookies.get('token') || '';
+            if (socket) socket.auth = { token: fresh };
+        });
         socket.on('disconnect', () => notifyState('disconnected'));
         socket.on('connect_error', () => notifyState('reconnecting'));
     }
