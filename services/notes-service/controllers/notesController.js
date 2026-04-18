@@ -521,6 +521,146 @@ exports.urlMeta = async (req, res) => {
     }
 };
 
+const hasAccess = (note, userId) => {
+    if (!note || !userId) return false;
+    if (note.owner_id === userId) return true;
+    if (Array.isArray(note.collaborators) && note.collaborators.includes(userId)) return true;
+    if (Array.isArray(note.viewers) && note.viewers.includes(userId)) return true;
+    return false;
+};
+
+exports.listComments = async (req, res) => {
+    try {
+        const noteId = req.params.id;
+
+        const { data: note } = await req.supabase
+            .from('notes')
+            .select('owner_id, collaborators, viewers, is_public')
+            .eq('id', noteId)
+            .single();
+        if (!note) return res.status(404).json({ status: 'fail', message: 'Note not found.' });
+
+        if (!hasAccess(note, req.user.id) && !note.is_public) {
+            return res.status(403).json({ status: 'fail', message: 'No access.' });
+        }
+
+        const { data: comments, error } = await req.supabase
+            .from('note_comments')
+            .select('id, body, author_id, created_at')
+            .eq('note_id', noteId)
+            .order('created_at', { ascending: true })
+            .limit(500);
+
+        if (error) {
+            console.error('[notes.listComments]', error);
+            return res.status(400).json({ status: 'fail', message: 'Could not load comments.' });
+        }
+
+        // Attach author usernames
+        const authorIds = [...new Set(comments.map((c) => c.author_id).filter(Boolean))];
+        let authorMap = {};
+        if (authorIds.length > 0) {
+            const { data: users } = await req.supabase
+                .from('users')
+                .select('id, username')
+                .in('id', authorIds);
+            if (users) authorMap = Object.fromEntries(users.map((u) => [u.id, u.username]));
+        }
+
+        const enriched = comments.map((c) => ({
+            ...c,
+            author: c.author_id ? authorMap[c.author_id] || 'Someone' : 'Deleted user',
+        }));
+
+        res.status(200).json({ status: 'success', results: enriched.length, data: { comments: enriched } });
+    } catch (err) {
+        console.error('[notes.listComments]', err);
+        res.status(500).json({ status: 'fail', message: 'Could not load comments.' });
+    }
+};
+
+exports.createComment = async (req, res) => {
+    try {
+        const noteId = req.params.id;
+        const body = (req.body && req.body.body || '').toString().trim();
+        if (!body) return res.status(400).json({ status: 'fail', message: 'Comment cannot be empty.' });
+        if (body.length > 2000) return res.status(400).json({ status: 'fail', message: 'Too long (max 2000 chars).' });
+
+        const { data: note } = await req.supabase
+            .from('notes')
+            .select('owner_id, collaborators, viewers')
+            .eq('id', noteId)
+            .single();
+        if (!note) return res.status(404).json({ status: 'fail', message: 'Note not found.' });
+        if (!hasAccess(note, req.user.id)) {
+            return res.status(403).json({ status: 'fail', message: 'No access.' });
+        }
+
+        const { data: inserted, error } = await req.supabase
+            .from('note_comments')
+            .insert([{ note_id: noteId, author_id: req.user.id, body }])
+            .select()
+            .single();
+
+        if (error) {
+            console.error('[notes.createComment]', error);
+            return res.status(400).json({ status: 'fail', message: 'Could not post comment.' });
+        }
+
+        res.status(201).json({
+            status: 'success',
+            data: {
+                comment: { ...inserted, author: req.user.username || 'Someone' },
+            },
+        });
+    } catch (err) {
+        console.error('[notes.createComment]', err);
+        res.status(500).json({ status: 'fail', message: 'Could not post comment.' });
+    }
+};
+
+exports.deleteComment = async (req, res) => {
+    try {
+        const { id: noteId, commentId } = req.params;
+
+        const { data: note } = await req.supabase
+            .from('notes')
+            .select('owner_id')
+            .eq('id', noteId)
+            .single();
+        if (!note) return res.status(404).json({ status: 'fail', message: 'Note not found.' });
+
+        const { data: comment } = await req.supabase
+            .from('note_comments')
+            .select('author_id')
+            .eq('id', commentId)
+            .eq('note_id', noteId)
+            .single();
+        if (!comment) return res.status(404).json({ status: 'fail', message: 'Comment not found.' });
+
+        const isAuthor = comment.author_id === req.user.id;
+        const isOwner = note.owner_id === req.user.id;
+        if (!isAuthor && !isOwner) {
+            return res.status(403).json({ status: 'fail', message: 'Cannot delete someone else\u2019s comment.' });
+        }
+
+        const { error } = await req.supabase
+            .from('note_comments')
+            .delete()
+            .eq('id', commentId);
+
+        if (error) {
+            console.error('[notes.deleteComment]', error);
+            return res.status(400).json({ status: 'fail', message: 'Could not delete comment.' });
+        }
+
+        res.status(204).end();
+    } catch (err) {
+        console.error('[notes.deleteComment]', err);
+        res.status(500).json({ status: 'fail', message: 'Could not delete comment.' });
+    }
+};
+
 exports.uploadImage = async (req, res) => {
     try {
         if (!req.file) {

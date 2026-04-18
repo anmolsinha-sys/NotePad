@@ -96,6 +96,11 @@ io.on('connection', (socket) => {
         socket.to(noteId).emit('cursor-moved', { socketId: socket.id, pos, user });
     });
 
+    socket.on('new-comment', ({ noteId, comment }) => {
+        if (!noteId) return;
+        socket.to(noteId).emit('comment-added', comment);
+    });
+
     socket.on('disconnect', () => {
         for (const noteId of socket.data.noteIds) {
             leaveRoom(socket, noteId);

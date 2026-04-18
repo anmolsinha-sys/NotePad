@@ -134,6 +134,9 @@ app.delete('/api/notes/:id', protect, writeLimiter, notesController.deleteNote);
 app.post('/api/notes/:id/invite', protect, writeLimiter, notesController.inviteCollaborator);
 app.get('/api/notes/:id/versions', protect, notesController.listVersions);
 app.post('/api/notes/:id/versions/:versionId/restore', protect, writeLimiter, notesController.restoreVersion);
+app.get('/api/notes/:id/comments', protect, notesController.listComments);
+app.post('/api/notes/:id/comments', protect, writeLimiter, notesController.createComment);
+app.delete('/api/notes/:id/comments/:commentId', protect, writeLimiter, notesController.deleteComment);
 app.post('/api/upload', protect, writeLimiter, upload.single('image'), notesController.uploadImage);
 
 app.use((err, req, res, next) => {

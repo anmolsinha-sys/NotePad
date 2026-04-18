@@ -50,6 +50,9 @@ export const notesApi = {
     listVersions: (id: string) => api.get(`/notes/${id}/versions`),
     restoreVersion: (id: string, versionId: string) => api.post(`/notes/${id}/versions/${versionId}/restore`),
     urlMeta: (url: string) => api.get(`/url-meta`, { params: { url } }),
+    listComments: (id: string) => api.get(`/notes/${id}/comments`),
+    createComment: (id: string, body: string) => api.post(`/notes/${id}/comments`, { body }),
+    deleteComment: (id: string, commentId: string) => api.delete(`/notes/${id}/comments/${commentId}`),
 };
 
 export default api;

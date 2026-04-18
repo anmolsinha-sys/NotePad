@@ -14,13 +14,14 @@ import BacklinksPanel from '@/components/BacklinksPanel';
 import GraphView from '@/components/GraphView';
 import LockScreen from '@/components/LockScreen';
 import DueDatePicker from '@/components/DueDatePicker';
+import CommentsPanel from '@/components/CommentsPanel';
 import { setWikilinkNotes } from '@/lib/wikilink-state';
 import { encryptWithPassphrase, decryptWithPassphrase, isEncryptedPayload } from '@/lib/crypto';
 import { exportToPDF } from '@/lib/export';
 import { htmlToMarkdown, markdownToHtml, downloadMarkdown } from '@/lib/markdown';
 import {
     Plus, Search, LogOut, Pin, Trash2, Share2,
-    FileText, Command, History, Focus, Settings as SettingsIcon, Menu, Calendar,
+    FileText, Command, History, Focus, Settings as SettingsIcon, Menu, Calendar, MessageSquare,
 } from 'lucide-react';
 import Cookies from 'js-cookie';
 import { disconnectSocket, emitTitleUpdate, subscribeToTitleUpdate, subscribeToConnectionState } from '@/lib/socket';
@@ -84,6 +85,8 @@ export default function Dashboard() {
     const [decryptedContent, setDecryptedContent] = useState<Record<string, string>>({});
     const [lockMode, setLockMode] = useState<'idle' | 'lock'>('idle');
     const [dueDateOpen, setDueDateOpen] = useState(false);
+    const [isCommentsOpen, setIsCommentsOpen] = useState(false);
+    const [commentCount, setCommentCount] = useState(0);
 
     useEffect(() => {
         try {
@@ -678,6 +681,18 @@ export default function Dashboard() {
                         </button>
                         <button
                             type="button"
+                            onClick={() => selectedNote && setIsCommentsOpen(true)}
+                            disabled={!selectedNote}
+                            className="btn btn-ghost py-1 px-2 text-xs relative"
+                            title="Comments"
+                        >
+                            <MessageSquare size={12} />
+                            {commentCount > 0 && (
+                                <span className="text-[10px] font-mono ml-1" style={{ color: 'var(--accent-strong)' }}>{commentCount}</span>
+                            )}
+                        </button>
+                        <button
+                            type="button"
                             onClick={() => selectedNote && setIsHistoryOpen(true)}
                             disabled={!selectedNote}
                             className="btn btn-ghost py-1 px-2 text-xs"
@@ -814,6 +829,7 @@ export default function Dashboard() {
             <HistoryDrawer
                 open={isHistoryOpen}
                 noteId={selectedNote?.id || null}
+                currentContent={selectedNote?.content || ''}
                 onClose={() => setIsHistoryOpen(false)}
                 onRestored={(content, title) => {
                     if (!selectedNote) return;
@@ -840,6 +856,14 @@ export default function Dashboard() {
                     onClose={() => setDueDateOpen(false)}
                 />
             )}
+
+            <CommentsPanel
+                open={isCommentsOpen}
+                noteId={selectedNote?.id || null}
+                currentUserId={user?.id || null}
+                onClose={() => setIsCommentsOpen(false)}
+                onCountChange={setCommentCount}
+            />
 
             {pendingDelete && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center p-4">

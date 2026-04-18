@@ -1,10 +1,69 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { notesApi } from '@/lib/api';
 import { formatDistanceToNow, parseISO, format } from 'date-fns';
 import { X, RotateCcw, History } from 'lucide-react';
 import { toast } from 'sonner';
+import { diff_match_patch } from 'diff-match-patch';
+
+const dmp = new diff_match_patch();
+
+const htmlToText = (html: string): string =>
+    html
+        .replace(/<br\s*\/?>/gi, '\n')
+        .replace(/<\/(p|h[1-6]|li|div|pre|blockquote)>/gi, '\n')
+        .replace(/<[^>]+>/g, '')
+        .replace(/&nbsp;/g, ' ')
+        .replace(/&amp;/g, '&')
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'")
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+
+const DiffView = ({ before, after }: { before: string; after: string }) => {
+    const diffs = useMemo(() => {
+        const d = dmp.diff_main(htmlToText(before), htmlToText(after));
+        dmp.diff_cleanupSemantic(d);
+        return d;
+    }, [before, after]);
+
+    return (
+        <pre
+            className="text-xs whitespace-pre-wrap font-mono"
+            style={{ color: 'var(--fg-muted)', lineHeight: 1.55 }}
+        >
+            {diffs.map(([op, text], i) => {
+                if (op === 0) return <span key={i}>{text}</span>;
+                if (op === 1) return (
+                    <span
+                        key={i}
+                        style={{
+                            background: 'color-mix(in oklab, var(--accent) 20%, transparent)',
+                            color: 'var(--accent-strong)',
+                        }}
+                    >
+                        {text}
+                    </span>
+                );
+                return (
+                    <span
+                        key={i}
+                        style={{
+                            background: 'rgba(239, 68, 68, 0.15)',
+                            color: '#fca5a5',
+                            textDecoration: 'line-through',
+                        }}
+                    >
+                        {text}
+                    </span>
+                );
+            })}
+        </pre>
+    );
+};
 
 type Version = {
     id: string;
@@ -17,11 +76,13 @@ type Version = {
 export default function HistoryDrawer({
     open,
     noteId,
+    currentContent,
     onClose,
     onRestored,
 }: {
     open: boolean;
     noteId: string | null;
+    currentContent?: string;
     onClose: () => void;
     onRestored?: (content: string, title: string | null) => void;
 }) {
@@ -29,6 +90,7 @@ export default function HistoryDrawer({
     const [selectedId, setSelectedId] = useState<string | null>(null);
     const [loading, setLoading] = useState(false);
     const [restoring, setRestoring] = useState(false);
+    const [view, setView] = useState<'preview' | 'diff'>('preview');
 
     useEffect(() => {
         if (!open || !noteId) return;
@@ -109,24 +171,55 @@ export default function HistoryDrawer({
                                     <div className="text-xs font-mono" style={{ color: 'var(--fg-dim)' }}>
                                         {format(parseISO(selected.created_at), 'PPpp')}
                                     </div>
-                                    <button
-                                        type="button"
-                                        onClick={restore}
-                                        disabled={restoring}
-                                        className="btn btn-primary text-xs mt-2"
-                                    >
-                                        <RotateCcw size={11} />
-                                        {restoring ? 'Restoring…' : 'Restore this version'}
-                                    </button>
-                                    <div className="text-[10px] mt-1" style={{ color: 'var(--fg-dim)' }}>
+                                    <div className="flex items-center gap-2 mt-2">
+                                        <button
+                                            type="button"
+                                            onClick={restore}
+                                            disabled={restoring}
+                                            className="btn btn-primary text-xs"
+                                        >
+                                            <RotateCcw size={11} />
+                                            {restoring ? 'Restoring…' : 'Restore'}
+                                        </button>
+                                        <div className="flex rounded-xs overflow-hidden" style={{ border: '1px solid var(--border)' }}>
+                                            <button
+                                                type="button"
+                                                onClick={() => setView('preview')}
+                                                className="text-[11px] px-2 py-1"
+                                                style={{
+                                                    background: view === 'preview' ? 'var(--bg-hover)' : 'transparent',
+                                                    color: view === 'preview' ? 'var(--fg)' : 'var(--fg-muted)',
+                                                }}
+                                            >
+                                                Preview
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => setView('diff')}
+                                                className="text-[11px] px-2 py-1"
+                                                style={{
+                                                    background: view === 'diff' ? 'var(--bg-hover)' : 'transparent',
+                                                    color: view === 'diff' ? 'var(--fg)' : 'var(--fg-muted)',
+                                                }}
+                                            >
+                                                Diff
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <div className="text-[10px] mt-1.5" style={{ color: 'var(--fg-dim)' }}>
                                         Your current content will be snapshotted before restore.
                                     </div>
                                 </div>
-                                <div
-                                    className="flex-1 overflow-y-auto px-4 py-3 text-xs"
-                                    style={{ color: 'var(--fg-muted)' }}
-                                    dangerouslySetInnerHTML={{ __html: selected.content }}
-                                />
+                                <div className="flex-1 overflow-y-auto px-4 py-3 text-xs">
+                                    {view === 'preview' ? (
+                                        <div
+                                            style={{ color: 'var(--fg-muted)' }}
+                                            dangerouslySetInnerHTML={{ __html: selected.content }}
+                                        />
+                                    ) : (
+                                        <DiffView before={selected.content} after={currentContent || ''} />
+                                    )}
+                                </div>
                             </>
                         ) : (
                             <div className="flex-1 flex items-center justify-center text-xs" style={{ color: 'var(--fg-dim)' }}>
