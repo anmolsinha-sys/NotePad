@@ -12,12 +12,15 @@ import SettingsPanel from '@/components/SettingsPanel';
 import StreakHeatmap from '@/components/StreakHeatmap';
 import BacklinksPanel from '@/components/BacklinksPanel';
 import GraphView from '@/components/GraphView';
+import LockScreen from '@/components/LockScreen';
+import DueDatePicker from '@/components/DueDatePicker';
 import { setWikilinkNotes } from '@/lib/wikilink-state';
+import { encryptWithPassphrase, decryptWithPassphrase, isEncryptedPayload } from '@/lib/crypto';
 import { exportToPDF } from '@/lib/export';
 import { htmlToMarkdown, markdownToHtml, downloadMarkdown } from '@/lib/markdown';
 import {
     Plus, Search, LogOut, Pin, Trash2, Share2,
-    FileText, Command, History, Focus, Settings as SettingsIcon, Menu,
+    FileText, Command, History, Focus, Settings as SettingsIcon, Menu, Calendar,
 } from 'lucide-react';
 import Cookies from 'js-cookie';
 import { disconnectSocket, emitTitleUpdate, subscribeToTitleUpdate, subscribeToConnectionState } from '@/lib/socket';
@@ -42,6 +45,8 @@ type Note = {
     tags?: string[];
     is_pinned?: boolean;
     is_public?: boolean;
+    is_encrypted?: boolean;
+    due_date?: string | null;
     updated_at?: string;
     owner_id?: string;
     collaborators?: string[];
@@ -73,6 +78,12 @@ export default function Dashboard() {
     const [isGraphOpen, setIsGraphOpen] = useState(false);
     const [isSidebarOpen, setIsSidebarOpen] = useState(false);
     const [typewriter, setTypewriter] = useState(false);
+
+    // Encryption: noteId -> plaintext content + passphrase, in-memory only
+    const [passphrases, setPassphrases] = useState<Record<string, string>>({});
+    const [decryptedContent, setDecryptedContent] = useState<Record<string, string>>({});
+    const [lockMode, setLockMode] = useState<'idle' | 'lock'>('idle');
+    const [dueDateOpen, setDueDateOpen] = useState(false);
 
     useEffect(() => {
         try {
@@ -258,6 +269,18 @@ export default function Dashboard() {
     const pinned = sorted.filter(n => n.is_pinned);
     const unpinned = sorted.filter(n => !n.is_pinned);
 
+    const todayStr = (() => {
+        const d = new Date();
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    })();
+    const dueNotes = sorted.filter((n) => n.due_date && n.due_date <= todayStr);
+    const overdueBadgeFor = (iso?: string | null): string | null => {
+        if (!iso) return null;
+        if (iso < todayStr) return 'Overdue';
+        if (iso === todayStr) return 'Today';
+        return null;
+    };
+
     const allTags: string[] = Array.from(new Set(notes.flatMap(n => n.tags || [])));
 
     // Global keybindings
@@ -286,6 +309,67 @@ export default function Dashboard() {
         window.addEventListener('keydown', onKey);
         return () => window.removeEventListener('keydown', onKey);
     }, [createNote, focusMode]);
+
+    const lockNote = async (passphrase: string): Promise<boolean> => {
+        if (!selectedNote) return false;
+        try {
+            const plain = decryptedContent[selectedNote.id] ?? selectedNote.content ?? '';
+            const cipher = await encryptWithPassphrase(plain, passphrase);
+            await notesApi.updateNote(selectedNote.id, { content: cipher, is_encrypted: true });
+            setNotes((prev) => prev.map((n) => n.id === selectedNote.id ? { ...n, content: cipher, is_encrypted: true } : n));
+            setSelectedNote((prev) => prev ? { ...prev, content: cipher, is_encrypted: true } : prev);
+            setPassphrases((prev) => ({ ...prev, [selectedNote.id]: passphrase }));
+            setDecryptedContent((prev) => ({ ...prev, [selectedNote.id]: plain }));
+            setLockMode('idle');
+            toast.success('Note locked');
+            return true;
+        } catch (err: any) {
+            toast.error(err?.response?.data?.message || 'Could not lock note');
+            return false;
+        }
+    };
+
+    const unlockNote = async (passphrase: string): Promise<boolean> => {
+        if (!selectedNote) return false;
+        const plain = await decryptWithPassphrase(selectedNote.content, passphrase);
+        if (plain === null) return false;
+        setPassphrases((prev) => ({ ...prev, [selectedNote.id]: passphrase }));
+        setDecryptedContent((prev) => ({ ...prev, [selectedNote.id]: plain }));
+        return true;
+    };
+
+    const setDueDate = async (iso: string | null) => {
+        if (!selectedNote) return;
+        try {
+            await notesApi.updateNote(selectedNote.id, { due_date: iso });
+            setNotes((prev) => prev.map((n) => n.id === selectedNote.id ? { ...n, due_date: iso } : n));
+            setSelectedNote((prev) => prev ? { ...prev, due_date: iso } : prev);
+            toast.success(iso ? `Due ${iso}` : 'Due date cleared');
+        } catch (err: any) {
+            toast.error(err?.response?.data?.message || 'Could not update due date');
+        }
+    };
+
+    const removePassword = async () => {
+        if (!selectedNote) return;
+        const plain = decryptedContent[selectedNote.id];
+        if (!plain) {
+            toast.error('Unlock the note first');
+            return;
+        }
+        try {
+            await notesApi.updateNote(selectedNote.id, { content: plain, is_encrypted: false });
+            setNotes((prev) => prev.map((n) => n.id === selectedNote.id ? { ...n, content: plain, is_encrypted: false } : n));
+            setSelectedNote((prev) => prev ? { ...prev, content: plain, is_encrypted: false } : prev);
+            setPassphrases((prev) => {
+                const { [selectedNote.id]: _, ...rest } = prev;
+                return rest;
+            });
+            toast.success('Password removed');
+        } catch (err: any) {
+            toast.error(err?.response?.data?.message || 'Could not remove password');
+        }
+    };
 
     const exportMarkdown = () => {
         if (!selectedNote) return;
@@ -335,6 +419,10 @@ export default function Dashboard() {
                 { id: 'act:focus', section: 'Actions' as const, icon: 'note' as const, label: focusMode ? 'Exit focus mode' : 'Focus mode', hint: '⌘.', run: () => setFocusMode((v) => !v) },
                 { id: 'act:pdf', section: 'Actions' as const, icon: 'export' as const, label: 'Export current note as PDF', run: () => exportToPDF('editor-content-target', `Note-${selectedNote.id}`) },
                 { id: 'act:md', section: 'Actions' as const, icon: 'export' as const, label: 'Export current note as Markdown', run: exportMarkdown },
+                selectedNote.is_encrypted
+                    ? { id: 'act:unlock', section: 'Actions' as const, icon: 'note' as const, label: 'Remove password from this note', run: () => removePassword() }
+                    : { id: 'act:lock', section: 'Actions' as const, icon: 'note' as const, label: 'Lock note with password', run: () => setLockMode('lock') },
+                { id: 'act:due', section: 'Actions' as const, icon: 'note' as const, label: selectedNote.due_date ? 'Change due date' : 'Set due date', run: () => setDueDateOpen(true) },
             ] : []),
             { id: 'act:logout', section: 'Actions', icon: 'logout', label: 'Sign out', run: logout },
         ];
@@ -427,6 +515,22 @@ export default function Dashboard() {
 
                 {/* Notes list */}
                 <div className="flex-1 overflow-y-auto px-1 py-2">
+                    {dueNotes.length > 0 && (
+                        <>
+                            <SectionHeader label="Due" count={dueNotes.length} />
+                            {dueNotes.map((n) => (
+                                <NoteRow
+                                    key={`due:${n.id}`}
+                                    note={n}
+                                    active={selectedNote?.id === n.id}
+                                    badge={overdueBadgeFor(n.due_date) || undefined}
+                                    onSelect={() => setSelectedNote(n)}
+                                    onPin={() => togglePin(n)}
+                                    onDelete={() => setPendingDelete(n)}
+                                />
+                            ))}
+                        </>
+                    )}
                     {pinned.length > 0 && (
                         <>
                             <SectionHeader label="Pinned" count={pinned.length} />
@@ -596,30 +700,55 @@ export default function Dashboard() {
                 <div className="flex-1 overflow-y-auto" data-scroll-root style={{ background: 'var(--bg)' }}>
                     {selectedNote ? (
                         <div className="max-w-3xl mx-auto px-8 py-8">
-                            <TiptapEditor
-                                key={selectedNote.id}
-                                noteId={selectedNote.id}
-                                initialContent={selectedNote.content}
-                                initialTags={selectedNote.tags || []}
-                                isShared={true}
-                                editable={true}
-                                typewriter={typewriter}
-                                onSave={(content, tags) => {
-                                    setNotes(prev => prev.map(n => n.id === selectedNote.id
-                                        ? { ...n, content, tags, updated_at: new Date().toISOString() }
-                                        : n));
-                                    setLastSavedAt(new Date());
-                                }}
-                                onCollaboratorsChange={setCollaboratorCount}
-                            />
-                            <BacklinksPanel
-                                notes={notes}
-                                currentNoteId={selectedNote.id}
-                                onOpen={(id) => {
-                                    const target = notes.find((n) => n.id === id);
-                                    if (target) setSelectedNote(target);
-                                }}
-                            />
+                            {lockMode === 'lock' ? (
+                                <LockScreen
+                                    mode="lock"
+                                    onSubmit={lockNote}
+                                    onCancel={() => setLockMode('idle')}
+                                />
+                            ) : selectedNote.is_encrypted && !passphrases[selectedNote.id] ? (
+                                <LockScreen mode="unlock" onSubmit={unlockNote} />
+                            ) : (
+                                <>
+                                    <TiptapEditor
+                                        key={selectedNote.id + ':' + (passphrases[selectedNote.id] ? 'decrypted' : 'plain')}
+                                        noteId={selectedNote.id}
+                                        initialContent={
+                                            selectedNote.is_encrypted
+                                                ? (decryptedContent[selectedNote.id] || '')
+                                                : selectedNote.content
+                                        }
+                                        initialTags={selectedNote.tags || []}
+                                        isShared={!selectedNote.is_encrypted}
+                                        editable={true}
+                                        typewriter={typewriter}
+                                        wrapContent={
+                                            selectedNote.is_encrypted && passphrases[selectedNote.id]
+                                                ? async (plain: string) => {
+                                                    setDecryptedContent((prev) => ({ ...prev, [selectedNote.id]: plain }));
+                                                    return encryptWithPassphrase(plain, passphrases[selectedNote.id]);
+                                                }
+                                                : undefined
+                                        }
+                                        onSave={(content, tags) => {
+                                            const storedContent = selectedNote.is_encrypted ? selectedNote.content : content;
+                                            setNotes(prev => prev.map(n => n.id === selectedNote.id
+                                                ? { ...n, content: storedContent, tags, updated_at: new Date().toISOString() }
+                                                : n));
+                                            setLastSavedAt(new Date());
+                                        }}
+                                        onCollaboratorsChange={setCollaboratorCount}
+                                    />
+                                    <BacklinksPanel
+                                        notes={notes}
+                                        currentNoteId={selectedNote.id}
+                                        onOpen={(id) => {
+                                            const target = notes.find((n) => n.id === id);
+                                            if (target) setSelectedNote(target);
+                                        }}
+                                    />
+                                </>
+                            )}
                         </div>
                     ) : (
                         <div className="h-full flex flex-col items-center justify-center gap-3">
@@ -703,6 +832,15 @@ export default function Dashboard() {
                 }}
             />
 
+            {dueDateOpen && selectedNote && (
+                <DueDatePicker
+                    initial={selectedNote.due_date || null}
+                    onSave={(iso) => setDueDate(iso)}
+                    onClear={() => setDueDate(null)}
+                    onClose={() => setDueDateOpen(false)}
+                />
+            )}
+
             {pendingDelete && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
                     <div onClick={() => setPendingDelete(null)} className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
@@ -733,8 +871,8 @@ function SectionHeader({ label, count }: { label: string; count: number }) {
     );
 }
 
-function NoteRow({ note, active, onSelect, onPin, onDelete }: {
-    note: Note; active: boolean; onSelect: () => void; onPin: () => void; onDelete: () => void;
+function NoteRow({ note, active, badge, onSelect, onPin, onDelete }: {
+    note: Note; active: boolean; badge?: string; onSelect: () => void; onPin: () => void; onDelete: () => void;
 }) {
     return (
         <div
@@ -753,6 +891,17 @@ function NoteRow({ note, active, onSelect, onPin, onDelete }: {
             >
                 {note.title || 'Untitled'}
             </span>
+            {badge && (
+                <span
+                    className="text-[9px] font-mono uppercase tracking-wide px-1 py-px rounded-xs"
+                    style={{
+                        background: badge === 'Overdue' ? '#ef4444' : 'var(--accent)',
+                        color: badge === 'Overdue' ? 'white' : '#00120a',
+                    }}
+                >
+                    {badge}
+                </span>
+            )}
             <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
                 <button
                     type="button"

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
+import Cookies from 'js-cookie';
 import { notesApi } from '@/lib/api';
 import { subscribeToTitleUpdate, subscribeToConnectionState } from '@/lib/socket';
 import TiptapEditor from '@/components/Editor';
@@ -16,8 +17,11 @@ export default function SharedNotePage() {
     const [loading, setLoading] = useState(true);
     const [connectionState, setConnectionState] = useState<string>('disconnected');
     const [collabCount, setCollabCount] = useState(0);
+    const [isAuthed, setIsAuthed] = useState(false);
 
     useEffect(() => {
+        setIsAuthed(Boolean(Cookies.get('token')));
+
         let cancelled = false;
         const fetchNote = async () => {
             try {
@@ -37,7 +41,6 @@ export default function SharedNotePage() {
         const unsubTitle = subscribeToTitleUpdate((newTitle) => {
             setNote((prev: any) => prev ? { ...prev, title: newTitle } : prev);
         });
-
         const unsubConn = subscribeToConnectionState(setConnectionState);
 
         return () => {
@@ -66,6 +69,72 @@ export default function SharedNotePage() {
         );
     }
 
+    // Magazine-style reader view for unauthenticated viewers
+    if (!isAuthed) {
+        return (
+            <div className="min-h-screen flex flex-col" style={{ background: 'var(--bg)', color: 'var(--fg)' }}>
+                <header
+                    className="h-11 px-4 flex items-center justify-between shrink-0 sticky top-0 z-10"
+                    style={{ borderBottom: '1px solid var(--border)', background: 'var(--bg-panel)' }}
+                >
+                    <div className="flex items-center gap-2">
+                        <div className="w-5 h-5 rounded-sm flex items-center justify-center" style={{ background: 'var(--accent)' }}>
+                            <span className="font-mono text-[10px] font-bold" style={{ color: '#00120a' }}>N</span>
+                        </div>
+                        <span className="text-sm font-medium">Notepad</span>
+                    </div>
+                    <button
+                        onClick={() => router.push('/auth')}
+                        className="btn btn-primary text-xs"
+                    >
+                        Sign up free
+                    </button>
+                </header>
+
+                <article className="flex-1 max-w-[68ch] w-full mx-auto px-6 py-16">
+                    <div className="text-[11px] font-mono uppercase tracking-wide mb-4" style={{ color: 'var(--fg-dim)' }}>
+                        Public note
+                    </div>
+                    <h1 className="text-3xl md:text-4xl font-semibold tracking-tight leading-tight mb-6">
+                        {note.title || 'Untitled'}
+                    </h1>
+                    <div className="h-px mb-8" style={{ background: 'var(--border)' }} />
+                    <div className="reader-content">
+                        <TiptapEditor
+                            key={note.id}
+                            noteId={note.id}
+                            initialContent={note.content}
+                            initialTags={note.tags || []}
+                            isShared={true}
+                            editable={false}
+                        />
+                    </div>
+                    <footer className="mt-16 pt-6 border-t text-center" style={{ borderColor: 'var(--border)' }}>
+                        <a
+                            href="/auth"
+                            className="inline-flex items-center gap-2 text-xs"
+                            style={{ color: 'var(--fg-muted)' }}
+                        >
+                            <span className="w-4 h-4 rounded-sm flex items-center justify-center" style={{ background: 'var(--accent)' }}>
+                                <span className="font-mono text-[9px] font-bold" style={{ color: '#00120a' }}>N</span>
+                            </span>
+                            Built with <span style={{ color: 'var(--accent-strong)' }}>Notepad</span>
+                        </a>
+                    </footer>
+                </article>
+
+                <style jsx global>{`
+                    .reader-content .ProseMirror {
+                        font-size: 1.0625rem;
+                        line-height: 1.8;
+                    }
+                    .reader-content [data-html2canvas-ignore] { display: none !important; }
+                `}</style>
+            </div>
+        );
+    }
+
+    // Authenticated viewer (collaborator / editor / owner via direct link)
     return (
         <div className="min-h-screen flex flex-col" style={{ background: 'var(--bg)', color: 'var(--fg)' }}>
             <header

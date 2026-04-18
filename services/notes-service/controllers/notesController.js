@@ -6,7 +6,7 @@ cloudinary.config({
     api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
-const UPDATABLE_FIELDS = ['title', 'content', 'tags', 'is_pinned', 'is_public', 'type', 'language', 'images'];
+const UPDATABLE_FIELDS = ['title', 'content', 'tags', 'is_pinned', 'is_public', 'is_encrypted', 'due_date', 'type', 'language', 'images'];
 const MAX_CONTENT_BYTES = 1_500_000;
 const SNAPSHOT_INTERVAL_MS = 5 * 60 * 1000;
 const MAX_VERSIONS_PER_NOTE = 50;

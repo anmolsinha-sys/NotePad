@@ -48,6 +48,7 @@ interface EditorProps {
     editable?: boolean;
     typewriter?: boolean;
     onCollaboratorsChange?: (count: number) => void;
+    wrapContent?: (plain: string) => Promise<string> | string;
 }
 
 const AUTOSAVE_DELAY = 800;
@@ -61,6 +62,7 @@ const TiptapEditor = ({
     editable = true,
     typewriter = false,
     onCollaboratorsChange,
+    wrapContent,
 }: EditorProps) => {
     const [isSaving, setIsSaving] = useState(false);
     const [tags, setTags] = useState<string[]>(initialTags);
@@ -96,7 +98,8 @@ const TiptapEditor = ({
         if (!noteId || !editable) return;
         setIsSaving(true);
         try {
-            await notesApi.updateNote(noteId, { content, tags: nextTags });
+            const payload = wrapContent ? await wrapContent(content) : content;
+            await notesApi.updateNote(noteId, { content: payload, tags: nextTags });
             onSave?.(content, nextTags);
         } catch (err: any) {
             toast.error(err?.response?.data?.message || 'Autosave failed');

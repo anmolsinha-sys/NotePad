@@ -73,3 +73,21 @@ CREATE INDEX IF NOT EXISTS note_versions_note_id_idx ON note_versions (note_id, 
 -- Viewer-only collaborators (read but not edit). `collaborators` stays as editor-level.
 ALTER TABLE notes
     ADD COLUMN IF NOT EXISTS viewers UUID[] DEFAULT '{}';
+
+-- Per-note client-side encryption flag (AES-GCM ciphertext lives in content)
+ALTER TABLE notes
+    ADD COLUMN IF NOT EXISTS is_encrypted BOOLEAN DEFAULT false;
+
+-- Due date for reminders / Today bucket
+ALTER TABLE notes
+    ADD COLUMN IF NOT EXISTS due_date DATE;
+
+-- Chat thread per note
+CREATE TABLE IF NOT EXISTS note_comments (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    note_id UUID REFERENCES notes(id) ON DELETE CASCADE NOT NULL,
+    author_id UUID REFERENCES users(id) ON DELETE SET NULL,
+    body TEXT NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS note_comments_note_id_idx ON note_comments (note_id, created_at);
