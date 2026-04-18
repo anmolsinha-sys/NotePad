@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Sun, Moon, Monitor, Check, Bookmark, AlertTriangle } from 'lucide-react';
 import { ACCENTS, type AccentName, type ThemeMode, getStoredAccent, getStoredMode, setAccent, setMode } from '@/lib/theme';
 import { cn } from '@/lib/utils';
@@ -21,12 +21,20 @@ export default function SettingsPanel({
     const [accent, setAccentState] = useState<AccentName>('emerald');
     const [danger, setDanger] = useState(false);
     const [origin, setOrigin] = useState<string>('');
+    const bookmarkletRef = useRef<HTMLAnchorElement>(null);
 
     useEffect(() => {
         setModeState(getStoredMode());
         setAccentState(getStoredAccent());
         if (typeof window !== 'undefined') setOrigin(window.location.origin);
     }, []);
+
+    useEffect(() => {
+        if (!origin || !bookmarkletRef.current) return;
+        const href = `javascript:(function(){var s=getSelection().toString();var u=location.href;var t=document.title;window.open('${origin}/clip?t='+encodeURIComponent(t)+'&u='+encodeURIComponent(u)+'&s='+encodeURIComponent(s),'_blank')})();`;
+        // React blocks javascript: URLs via the href prop — set via DOM instead.
+        bookmarkletRef.current.setAttribute('href', href);
+    }, [origin]);
 
     const handleMode = (m: ThemeMode) => {
         setModeState(m);
@@ -37,8 +45,6 @@ export default function SettingsPanel({
         setAccentState(a);
         setAccent(a);
     };
-
-    const bookmarklet = `javascript:(function(){var s=getSelection().toString();var u=location.href;var t=document.title;window.open('${origin}/clip?t='+encodeURIComponent(t)+'&u='+encodeURIComponent(u)+'&s='+encodeURIComponent(s),'_blank')})();`;
 
     const deleteAccount = async () => {
         if (!confirm('This deletes your account and ALL your notes permanently. Type yes to confirm.')) return;
@@ -54,7 +60,7 @@ export default function SettingsPanel({
     };
 
     return (
-        <div className="w-[280px] p-3 space-y-3">
+        <div className="w-full p-3 space-y-3">
             <div>
                 <div className="text-[10px] uppercase tracking-wide font-medium mb-1.5" style={{ color: 'var(--fg-dim)' }}>Theme</div>
                 <div className="flex gap-1">
@@ -140,7 +146,7 @@ export default function SettingsPanel({
                 </p>
                 {origin && (
                     <a
-                        href={bookmarklet}
+                        ref={bookmarkletRef}
                         onClick={(e) => e.preventDefault()}
                         className="block px-2 py-1 rounded-xs text-[11px] font-mono text-center"
                         style={{
@@ -150,10 +156,14 @@ export default function SettingsPanel({
                             cursor: 'grab',
                         }}
                         draggable
+                        title="Drag this to your bookmarks bar"
                     >
                         + Clip to Notepad
                     </a>
                 )}
+                <p className="text-[10px] mt-1" style={{ color: 'var(--fg-dim)' }}>
+                    Can't drag? Right-click the link and choose &ldquo;Copy link&rdquo;, then add a bookmark with that URL.
+                </p>
             </div>
 
             <div className="h-px" style={{ background: 'var(--border)' }} />

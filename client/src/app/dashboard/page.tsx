@@ -610,7 +610,7 @@ export default function Dashboard() {
                             <div className="text-[10px] truncate font-mono" style={{ color: 'var(--fg-dim)' }}>{user?.email}</div>
                         </div>
                     </div>
-                    <div className="flex items-center gap-0.5 relative">
+                    <div className="flex items-center gap-0.5">
                         <button
                             onClick={() => setIsSettingsOpen((v) => !v)}
                             className="btn btn-ghost p-1"
@@ -621,18 +621,24 @@ export default function Dashboard() {
                         <button onClick={logout} className="btn btn-ghost p-1" title="Sign out">
                             <LogOut size={13} />
                         </button>
-                        {isSettingsOpen && (
-                            <>
-                                <div onClick={() => setIsSettingsOpen(false)} className="fixed inset-0 z-40" />
-                                <div className="absolute bottom-full right-0 mb-2 z-50 surface shadow-xl">
-                                    <SettingsPanel
-                                        typewriter={typewriter}
-                                        onTypewriterChange={setTypewriter}
-                                    />
-                                </div>
-                            </>
-                        )}
                     </div>
+                    {isSettingsOpen && (
+                        <>
+                            <div
+                                onClick={() => setIsSettingsOpen(false)}
+                                className="fixed inset-0 z-40"
+                            />
+                            <div
+                                className="fixed z-50 surface shadow-xl"
+                                style={{ bottom: 52, left: 8, width: 244 }}
+                            >
+                                <SettingsPanel
+                                    typewriter={typewriter}
+                                    onTypewriterChange={setTypewriter}
+                                />
+                            </div>
+                        </>
+                    )}
                 </div>
             </aside>
 
