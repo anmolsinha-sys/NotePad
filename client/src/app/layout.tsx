@@ -1,7 +1,8 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Inter, JetBrains_Mono } from "next/font/google";
 import { Toaster } from "sonner";
 import ThemeInit from "@/components/ThemeInit";
+import ServiceWorker from "@/components/ServiceWorker";
 import "./globals.css";
 
 const inter = Inter({
@@ -19,6 +20,19 @@ const jetbrainsMono = JetBrains_Mono({
 export const metadata: Metadata = {
   title: "Notepad",
   description: "A fast, developer-focused notepad with real-time collaboration.",
+  applicationName: "Notepad",
+  appleWebApp: {
+    capable: true,
+    title: "Notepad",
+    statusBarStyle: "black-translucent",
+  },
+};
+
+export const viewport: Viewport = {
+  themeColor: [
+    { media: "(prefers-color-scheme: dark)", color: "#0a0a0a" },
+    { media: "(prefers-color-scheme: light)", color: "#fafafa" },
+  ],
 };
 
 export default function RootLayout({
@@ -33,6 +47,7 @@ export default function RootLayout({
     >
       <body className="min-h-full flex flex-col">
         <ThemeInit />
+        <ServiceWorker />
         {children}
         <Toaster
           theme="dark"
