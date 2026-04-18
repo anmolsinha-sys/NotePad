@@ -48,3 +48,24 @@ CREATE TRIGGER update_notes_updated_at
 BEFORE UPDATE ON notes
 FOR EACH ROW
 EXECUTE FUNCTION update_updated_at_column();
+
+-- Full-text search (title weight A, content weight B; strip HTML for content)
+ALTER TABLE notes
+    ADD COLUMN IF NOT EXISTS search_tsv tsvector GENERATED ALWAYS AS (
+        setweight(to_tsvector('english', coalesce(title, '')), 'A') ||
+        setweight(to_tsvector('english', coalesce(regexp_replace(content, '<[^>]+>', ' ', 'g'), '')), 'B')
+    ) STORED;
+
+CREATE INDEX IF NOT EXISTS notes_search_idx ON notes USING GIN (search_tsv);
+
+-- Version history
+CREATE TABLE IF NOT EXISTS note_versions (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    note_id UUID REFERENCES notes(id) ON DELETE CASCADE NOT NULL,
+    content TEXT NOT NULL,
+    title TEXT,
+    created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS note_versions_note_id_idx ON note_versions (note_id, created_at DESC);

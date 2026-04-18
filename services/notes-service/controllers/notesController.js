@@ -192,6 +192,49 @@ exports.deleteNote = async (req, res) => {
     }
 };
 
+exports.searchNotes = async (req, res) => {
+    try {
+        const q = (req.query.q || '').toString().trim();
+        if (!q) return res.status(200).json({ status: 'success', results: 0, data: { notes: [] } });
+
+        const { data: notes, error } = await req.supabase
+            .from('notes')
+            .select('id, title, content, tags, updated_at, is_pinned, is_public, owner_id, collaborators')
+            .or(`owner_id.eq.${req.user.id},collaborators.cs.{${req.user.id}}`)
+            .textSearch('search_tsv', q, { type: 'websearch', config: 'english' })
+            .limit(20);
+
+        if (error) {
+            console.error('[notes.search]', error);
+            return res.status(400).json({ status: 'fail', message: 'Search failed.' });
+        }
+
+        const needle = q.toLowerCase();
+        const snippetFor = (html) => {
+            const text = (html || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+            const idx = text.toLowerCase().indexOf(needle);
+            if (idx === -1) return text.slice(0, 140);
+            const start = Math.max(0, idx - 40);
+            const end = Math.min(text.length, idx + needle.length + 80);
+            return (start > 0 ? '…' : '') + text.slice(start, end) + (end < text.length ? '…' : '');
+        };
+
+        const results = notes.map((n) => ({
+            id: n.id,
+            title: n.title,
+            snippet: snippetFor(n.content),
+            tags: n.tags,
+            updated_at: n.updated_at,
+            is_pinned: n.is_pinned,
+        }));
+
+        res.status(200).json({ status: 'success', results: results.length, data: { notes: results } });
+    } catch (err) {
+        console.error('[notes.search]', err);
+        res.status(500).json({ status: 'fail', message: 'Search failed.' });
+    }
+};
+
 exports.inviteCollaborator = async (req, res) => {
     try {
         const noteId = req.params.id;
