@@ -85,7 +85,10 @@ export default function SharedNotePage() {
                         initialTags={note.tags || []}
                         isShared={true}
                         editable={canEdit}
-                        onSave={(content) => canEdit && notesApi.updateNote(note.id, { content })}
+                        onSave={(content, tags) => {
+                            if (!canEdit) return;
+                            notesApi.updateNote(note.id, { content, tags });
+                        }}
                     />
                 </motion.div>
             </main>

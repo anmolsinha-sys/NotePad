@@ -26,7 +26,7 @@ import socket, {
 } from '@/lib/socket';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
-import confetti from 'canvas-confetti';
+import { toast } from 'sonner';
 
 function cn(...inputs: ClassValue[]) {
     return twMerge(clsx(inputs));
@@ -49,6 +49,7 @@ const TiptapEditor = ({ initialContent = '', initialTags = [], noteId, onSave, i
     const [tags, setTags] = useState<string[]>(initialTags);
     const [tagInput, setTagInput] = useState('');
     const lastEmittedContent = useRef<string>(initialContent);
+    const isApplyingRemoteUpdate = useRef<boolean>(false);
     const [showBlockMenu, setShowBlockMenu] = useState(false);
     const [showTextSizeMenu, setShowTextSizeMenu] = useState(false);
     const textSizeMenuRef = useRef<HTMLDivElement>(null);
@@ -56,6 +57,8 @@ const TiptapEditor = ({ initialContent = '', initialTags = [], noteId, onSave, i
 
     // Real-time Presence State
     const [activeUsers, setActiveUsers] = useState<any[]>([]);
+    const activeUsersRef = useRef<any[]>([]);
+    useEffect(() => { activeUsersRef.current = activeUsers; }, [activeUsers]);
     const [remoteCursors, setRemoteCursors] = useState<Record<string, any>>({});
 
     // Resolve Current User
@@ -109,6 +112,7 @@ const TiptapEditor = ({ initialContent = '', initialTags = [], noteId, onSave, i
             },
         },
         onUpdate: ({ editor }) => {
+            if (isApplyingRemoteUpdate.current) return;
             const content = editor.getHTML();
             if (noteId && isShared && content !== lastEmittedContent.current) {
                 lastEmittedContent.current = content;
@@ -142,12 +146,10 @@ const TiptapEditor = ({ initialContent = '', initialTags = [], noteId, onSave, i
             if (imageUrl) {
                 editor.chain().focus().setImage({ src: imageUrl }).run();
             } else {
-                console.error('No URL in response:', res.data);
-                alert('Image uploaded but no URL returned.');
+                toast.error('Image uploaded but no URL returned.');
             }
-        } catch (err) {
-            console.error('Image upload failed:', err);
-            alert('Failed to upload image. Please try again.');
+        } catch (err: any) {
+            toast.error(err?.response?.data?.message || 'Failed to upload image.');
         }
         // Reset the input so the same file can be re-uploaded
         if (fileInputRef.current) {
@@ -155,66 +157,57 @@ const TiptapEditor = ({ initialContent = '', initialTags = [], noteId, onSave, i
         }
     };
 
-    // Confetti logic for "Done" or "Completed"
-    useEffect(() => {
-        const triggers = ['done', 'completed', 'finished', 'winner', 'milestone', 'published'];
-        if (tags.some(tag => triggers.includes(tag.toLowerCase()))) {
-            confetti({
-                particleCount: 150,
-                spread: 70,
-                origin: { y: 0.6 },
-                colors: ['#3b82f6', '#8b5cf6', '#ec4899', '#facc15', '#10b981'],
-                disableForReducedMotion: true
-            });
-        }
-    }, [tags]);
-
     // Collaborate Presence & Cursors Logic
     useEffect(() => {
-        if (noteId && isShared && editor) {
-            const userName = currentUser?.name || `Guest-${Math.floor(Math.random() * 1000)}`;
-            const userEmail = currentUser?.email || 'guest@notepad.local';
+        if (!(noteId && isShared && editor)) return;
 
-            const unsubRoom = joinNoteRoom(noteId, { name: userName, email: userEmail });
+        const userName = currentUser?.username || currentUser?.name || `Guest-${Math.floor(Math.random() * 1000)}`;
+        const userEmail = currentUser?.email || 'guest@notepad.local';
 
-            const unsubUpdates = subscribeToNoteUpdate((newContent) => {
-                if (editor.getHTML() !== newContent) {
-                    lastEmittedContent.current = newContent;
-                    editor.commands.setContent(newContent, false);
-                }
-            });
+        const unsubRoom = joinNoteRoom(noteId, { name: userName, email: userEmail });
 
-            const unsubUsers = subscribeToUsersUpdate((users) => {
-                setActiveUsers(users.filter(u => u.socketId !== socket?.id));
-            });
+        const unsubUpdates = subscribeToNoteUpdate((newContent: string) => {
+            if (editor.isDestroyed) return;
+            if (editor.getHTML() === newContent) return;
+            isApplyingRemoteUpdate.current = true;
+            lastEmittedContent.current = newContent;
+            editor.commands.setContent(newContent, false);
+            queueMicrotask(() => { isApplyingRemoteUpdate.current = false; });
+        });
 
-            const unsubCursors = subscribeToCursorMove((data) => {
-                const { socketId, pos, user } = data;
-                try {
-                    const coords = editor.view.coordsAtPos(pos);
-                    const domRect = editor.view.dom.getBoundingClientRect();
-                    const userInfo = activeUsers.find(u => u.socketId === socketId);
+        const unsubUsers = subscribeToUsersUpdate((users: any[]) => {
+            setActiveUsers(users.filter((u) => u.socketId !== socket?.id));
+        });
 
-                    setRemoteCursors(prev => ({
-                        ...prev,
-                        [socketId]: {
-                            x: coords.left - domRect.left,
-                            y: coords.top - domRect.top,
-                            name: user.name,
-                            color: userInfo?.color || '#3b82f6'
-                        }
-                    }));
-                } catch (e) { }
-            });
+        const unsubCursors = subscribeToCursorMove((data: any) => {
+            if (editor.isDestroyed) return;
+            const { socketId, pos, user } = data;
+            try {
+                const coords = editor.view.coordsAtPos(pos);
+                const domRect = editor.view.dom.getBoundingClientRect();
+                const userInfo = activeUsersRef.current.find((u) => u.socketId === socketId);
 
-            return () => {
-                unsubUpdates();
-                unsubUsers();
-                unsubCursors();
-                unsubRoom();
-            };
-        }
-    }, [noteId, isShared, editor, activeUsers, currentUser]);
+                setRemoteCursors((prev) => ({
+                    ...prev,
+                    [socketId]: {
+                        x: coords.left - domRect.left,
+                        y: coords.top - domRect.top,
+                        name: user?.name || 'Guest',
+                        color: userInfo?.color || '#10b981',
+                    },
+                }));
+            } catch {
+                // Cursor position out of range during sync — ignore.
+            }
+        });
+
+        return () => {
+            unsubUpdates();
+            unsubUsers();
+            unsubCursors();
+            unsubRoom();
+        };
+    }, [noteId, isShared, editor, currentUser]);
 
     const handleSave = async () => {
         if (!editor || !noteId) return;
@@ -222,8 +215,9 @@ const TiptapEditor = ({ initialContent = '', initialTags = [], noteId, onSave, i
         try {
             await notesApi.updateNote(noteId, { content: editor.getHTML(), tags });
             onSave?.(editor.getHTML(), tags);
-        } catch (err) {
-            console.error('Save failed:', err);
+            toast.success('Saved');
+        } catch (err: any) {
+            toast.error(err?.response?.data?.message || 'Save failed');
         } finally {
             setIsSaving(false);
         }

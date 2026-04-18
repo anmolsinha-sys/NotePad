@@ -32,42 +32,74 @@ const io = new Server(server, {
     },
 });
 
-const rooms = new Map(); // noteId -> Set of users { id, name, color }
+// rooms: noteId -> Map<socketId, user>
+const rooms = new Map();
+
+const uniqueByEmail = (users) => {
+    const seen = new Map();
+    for (const u of users) {
+        const key = (u.email || u.socketId).toLowerCase();
+        if (!seen.has(key)) seen.set(key, u);
+    }
+    return Array.from(seen.values());
+};
+
+const leaveRoom = (socket, noteId) => {
+    const users = rooms.get(noteId);
+    if (!users) return;
+    if (users.delete(socket.id) && users.size === 0) {
+        rooms.delete(noteId);
+        return;
+    }
+    io.to(noteId).emit('users-update', uniqueByEmail(Array.from(users.values())));
+};
 
 io.on('connection', (socket) => {
-    console.log('A user connected:', socket.id);
+    socket.data.noteIds = new Set();
 
     socket.on('join-note', ({ noteId, user }) => {
+        if (!noteId) return;
+
         socket.join(noteId);
+        socket.data.noteIds.add(noteId);
 
         if (!rooms.has(noteId)) rooms.set(noteId, new Map());
-        const userWithColor = { ...user, socketId: socket.id, color: getRandomColor() };
-        rooms.get(noteId).set(socket.id, userWithColor);
+        const userWithMeta = {
+            ...user,
+            socketId: socket.id,
+            color: getRandomColor(),
+        };
+        rooms.get(noteId).set(socket.id, userWithMeta);
 
-        console.log(`User ${user?.name || 'Anonymous'} joined note ${noteId}`);
-        io.to(noteId).emit('users-update', Array.from(rooms.get(noteId).values()));
+        io.to(noteId).emit('users-update', uniqueByEmail(Array.from(rooms.get(noteId).values())));
+    });
+
+    socket.on('leave-note', ({ noteId }) => {
+        if (!noteId) return;
+        socket.leave(noteId);
+        socket.data.noteIds.delete(noteId);
+        leaveRoom(socket, noteId);
     });
 
     socket.on('update-note', ({ noteId, content }) => {
+        if (!noteId) return;
         socket.to(noteId).emit('note-updated', content);
     });
 
     socket.on('update-title', ({ noteId, title }) => {
+        if (!noteId) return;
         socket.to(noteId).emit('title-updated', title);
     });
 
     socket.on('cursor-move', ({ noteId, pos, user }) => {
+        if (!noteId) return;
         socket.to(noteId).emit('cursor-moved', { socketId: socket.id, pos, user });
     });
 
     socket.on('disconnect', () => {
-        rooms.forEach((users, noteId) => {
-            if (users.has(socket.id)) {
-                users.delete(socket.id);
-                io.to(noteId).emit('users-update', Array.from(users.values()));
-            }
-        });
-        console.log('User disconnected:', socket.id);
+        for (const noteId of socket.data.noteIds) {
+            leaveRoom(socket, noteId);
+        }
     });
 });
 

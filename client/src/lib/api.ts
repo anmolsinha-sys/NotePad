@@ -37,6 +37,11 @@ export const notesApi = {
     uploadImage: (formData: FormData) => api.post('/upload', formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
     }),
+    inviteCollaborator: (id: string, email: string) => api.post(`/notes/${id}/invite`, { email }),
+    removeCollaborator: (id: string, userId: string) => api.delete(`/notes/${id}/collaborators/${userId}`),
+    searchNotes: (q: string) => api.get(`/notes/search`, { params: { q } }),
+    listVersions: (id: string) => api.get(`/notes/${id}/versions`),
+    restoreVersion: (id: string, versionId: string) => api.post(`/notes/${id}/versions/${versionId}/restore`),
 };
 
 export default api;

@@ -7,13 +7,25 @@ import TiptapEditor from '@/components/Editor';
 import ShareModal from '@/components/ShareModal';
 import {
     Plus, FileText, Search, Settings,
-    LogOut, User as UserIcon, Clock, Share2,
-    ChevronRight, ChevronLeft, MoreVertical, Trash2, Pin
+    LogOut, Clock, Share2,
+    ChevronLeft, Trash2, Pin
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Cookies from 'js-cookie';
 import { disconnectSocket, emitTitleUpdate, subscribeToTitleUpdate } from '@/lib/socket';
 import { cn } from '@/lib/utils';
+import { toast } from 'sonner';
+import { formatDistanceToNow, parseISO } from 'date-fns';
+
+const relativeDate = (iso: string | Date | null | undefined) => {
+    if (!iso) return '';
+    try {
+        const d = typeof iso === 'string' ? parseISO(iso) : iso;
+        return formatDistanceToNow(d, { addSuffix: true });
+    } catch {
+        return '';
+    }
+};
 
 export default function Dashboard() {
     const [notes, setNotes] = useState<any[]>([]);
@@ -28,26 +40,32 @@ export default function Dashboard() {
     const router = useRouter();
 
     useEffect(() => {
+        let cancelled = false;
         const init = async () => {
             try {
-                const [authRes, notesRes] = await Promise.all([
-                    authApi.validate(),
-                    notesApi.getNotes()
-                ]);
-                setUser(authRes.data.data.user);
-                setNotes(notesRes.data.data.notes);
-                if (notesRes.data.data.notes.length > 0) {
-                    setSelectedNote(notesRes.data.data.notes[0]);
-                }
+                const authRes = await authApi.validate();
+                if (cancelled) return;
+                const validatedUser = authRes.data.data.user;
+                setUser(validatedUser);
+                try {
+                    localStorage.setItem('user', JSON.stringify(validatedUser));
+                } catch {}
+
+                const notesRes = await notesApi.getNotes();
+                if (cancelled) return;
+                const fetched = notesRes.data.data.notes || [];
+                setNotes(fetched);
+                if (fetched.length > 0) setSelectedNote(fetched[0]);
             } catch (err) {
-                console.error('Initialization failed:', err);
+                if (cancelled) return;
                 router.push('/auth');
             } finally {
-                setLoading(false);
+                if (!cancelled) setLoading(false);
             }
         };
         init();
-    }, []);
+        return () => { cancelled = true; };
+    }, [router]);
 
     useEffect(() => {
         if (!selectedNote) return;
@@ -82,36 +100,60 @@ export default function Dashboard() {
             const res = await notesApi.createNote({ title: 'Untitled Note', content: '', tags: [] });
             setNotes([res.data.data.note, ...notes]);
             setSelectedNote(res.data.data.note);
-        } catch (err) {
-            console.error('Failed to create note:', err);
+            toast.success('Note created');
+        } catch (err: any) {
+            toast.error(err?.response?.data?.message || 'Could not create note');
         }
     };
 
-    const handleDeleteNote = async (id: string, e: React.MouseEvent) => {
-        e.stopPropagation();
-        if (!window.confirm('Delete this note?')) return;
+    const [pendingDelete, setPendingDelete] = useState<any>(null);
+
+    const confirmDelete = async () => {
+        const note = pendingDelete;
+        if (!note) return;
         try {
-            await notesApi.deleteNote(id);
-            const updatedNotes = notes.filter(n => n.id !== id);
+            await notesApi.deleteNote(note.id);
+            const updatedNotes = notes.filter((n) => n.id !== note.id);
             setNotes(updatedNotes);
-            if (selectedNote?.id === id) {
+            if (selectedNote?.id === note.id) {
                 setSelectedNote(updatedNotes[0] || null);
             }
-        } catch (err) {
-            console.error('Failed to delete note:', err);
+            toast.success('Note deleted');
+        } catch (err: any) {
+            toast.error(err?.response?.data?.message || 'Could not delete note');
+        } finally {
+            setPendingDelete(null);
         }
     };
 
     const handleUpdateTitle = async (id: string, newTitle: string) => {
-        if (!newTitle.trim()) return;
+        const trimmed = newTitle.trim();
+        if (!trimmed) return;
         try {
-            await notesApi.updateNote(id, { title: newTitle });
-            setNotes(prev => prev.map(n => n.id === id ? { ...n, title: newTitle } : n));
-            setSelectedNote((prev: any) => prev?.id === id ? { ...prev, title: newTitle } : prev);
-            emitTitleUpdate(id, newTitle);
-        } catch (err) {
-            console.error('Failed to update title:', err);
+            await notesApi.updateNote(id, { title: trimmed });
+            setNotes(prev => prev.map(n => n.id === id ? { ...n, title: trimmed } : n));
+            setSelectedNote((prev: any) => prev?.id === id ? { ...prev, title: trimmed } : prev);
+            emitTitleUpdate(id, trimmed);
+        } catch (err: any) {
+            toast.error(err?.response?.data?.message || 'Could not rename note');
         }
+    };
+
+    const handleTogglePin = async (note: any) => {
+        const next = !note.is_pinned;
+        setNotes(prev => prev.map(n => n.id === note.id ? { ...n, is_pinned: next } : n));
+        try {
+            await notesApi.updateNote(note.id, { is_pinned: next });
+        } catch (err: any) {
+            setNotes(prev => prev.map(n => n.id === note.id ? { ...n, is_pinned: !next } : n));
+            toast.error(err?.response?.data?.message || 'Could not update pin');
+        }
+    };
+
+    const handlePublicChange = (next: boolean) => {
+        if (!selectedNote) return;
+        setNotes(prev => prev.map(n => n.id === selectedNote.id ? { ...n, is_public: next } : n));
+        setSelectedNote((prev: any) => prev ? { ...prev, is_public: next } : prev);
     };
 
     const handleLogout = () => {
@@ -121,9 +163,11 @@ export default function Dashboard() {
     };
 
     const filteredNotes = notes.filter(note => {
-        const matchesSearch = note.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-            note.content.toLowerCase().includes(searchQuery.toLowerCase());
-        const matchesTag = activeTag ? note.tags?.includes(activeTag) : true;
+        const q = searchQuery.toLowerCase();
+        const title = (note.title || '').toLowerCase();
+        const content = (note.content || '').toLowerCase();
+        const matchesSearch = !q || title.includes(q) || content.includes(q);
+        const matchesTag = activeTag ? (note.tags || []).includes(activeTag) : true;
         return matchesSearch && matchesTag;
     });
 
@@ -251,23 +295,19 @@ export default function Dashboard() {
                                         {!isSidebarMinimized && (
                                             <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all transform translate-x-2 group-hover:translate-x-0">
                                                 <button
-                                                    onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        notesApi.updateNote(note.id, { is_pinned: !note.is_pinned });
-                                                        setNotes(notes.map(n => n.id === note.id ? { ...n, is_pinned: !n.is_pinned } : n));
-                                                    }}
+                                                    onClick={(e) => { e.stopPropagation(); handleTogglePin(note); }}
                                                     className={cn("p-2 rounded-xl transition-all", note.is_pinned ? 'text-amber-500 bg-amber-500/10' : 'text-gray-500 hover:text-white hover:bg-white/10')}
                                                 >
                                                     <Pin size={14} className={note.is_pinned ? 'fill-current' : ''} />
                                                 </button>
-                                                <button onClick={(e) => handleDeleteNote(note.id, e)} className="p-2 rounded-xl text-gray-500 hover:text-red-400 hover:bg-red-400/10 transition-all">
+                                                <button onClick={(e) => { e.stopPropagation(); setPendingDelete(note); }} className="p-2 rounded-xl text-gray-500 hover:text-red-400 hover:bg-red-400/10 transition-all">
                                                     <Trash2 size={14} />
                                                 </button>
                                             </div>
                                         )}
                                     </div>
 
-                                    {isSidebarMinimized && !note.isPinned && (
+                                    {isSidebarMinimized && !note.is_pinned && (
                                         <div className="w-10 h-10 rounded-2xl bg-white/5 flex items-center justify-center text-sm font-black text-gray-500 transition-all group-hover:bg-blue-600/20 group-hover:text-blue-400 ring-1 ring-white/5">
                                             {note.title[0]?.toUpperCase() || 'N'}
                                         </div>
@@ -289,7 +329,7 @@ export default function Dashboard() {
                                                 </div>
                                                 <div className="flex items-center gap-1.5 text-[9px] font-black text-gray-600 uppercase tracking-tighter">
                                                     <Clock size={10} />
-                                                    {new Date(note.updated_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                                                    {relativeDate(note.updated_at)}
                                                 </div>
                                             </div>
                                         </>
@@ -428,11 +468,11 @@ export default function Dashboard() {
                                     noteId={selectedNote.id}
                                     initialContent={selectedNote.content}
                                     initialTags={selectedNote.tags || []}
-                                    isShared={selectedNote.isPublic || false}
+                                    isShared={true}
                                     editable={true}
                                     theme={currentTheme}
                                     onSave={(content, tags) => {
-                                        setNotes(notes.map(n => n.id === selectedNote.id ? { ...n, content, tags, updated_at: new Date() } : n));
+                                        setNotes(notes.map(n => n.id === selectedNote.id ? { ...n, content, tags, updated_at: new Date().toISOString() } : n));
                                     }}
                                 />
                             </motion.div>
@@ -471,8 +511,35 @@ export default function Dashboard() {
                     onClose={() => setIsShareModalOpen(false)}
                     noteId={selectedNote.id}
                     noteTitle={selectedNote.title}
-                    isPublic={selectedNote.isPublic}
+                    isPublic={selectedNote.is_public || false}
+                    onPublicChange={handlePublicChange}
                 />
+            )}
+
+            {pendingDelete && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+                    <div onClick={() => setPendingDelete(null)} className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
+                    <div className="relative w-full max-w-sm bg-[#111] border border-[#27272a] p-5 rounded-lg">
+                        <h3 className="text-sm font-semibold text-zinc-100 mb-1">Delete this note?</h3>
+                        <p className="text-xs text-zinc-400 mb-4 truncate">&ldquo;{pendingDelete.title}&rdquo; will be permanently removed.</p>
+                        <div className="flex gap-2 justify-end">
+                            <button
+                                type="button"
+                                onClick={() => setPendingDelete(null)}
+                                className="px-3 py-1.5 text-xs text-zinc-300 hover:bg-white/5 rounded transition-colors"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                type="button"
+                                onClick={confirmDelete}
+                                className="px-3 py-1.5 text-xs font-medium bg-red-500 hover:bg-red-400 text-white rounded transition-colors"
+                            >
+                                Delete
+                            </button>
+                        </div>
+                    </div>
+                </div>
             )}
 
             <style jsx global>{`

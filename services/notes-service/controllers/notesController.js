@@ -192,6 +192,65 @@ exports.deleteNote = async (req, res) => {
     }
 };
 
+exports.inviteCollaborator = async (req, res) => {
+    try {
+        const noteId = req.params.id;
+        const email = (req.body && req.body.email || '').trim().toLowerCase();
+
+        if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+            return res.status(400).json({ status: 'fail', message: 'Enter a valid email.' });
+        }
+
+        const { data: note, error: fetchError } = await req.supabase
+            .from('notes')
+            .select('owner_id, collaborators')
+            .eq('id', noteId)
+            .single();
+
+        if (fetchError || !note) {
+            return res.status(404).json({ status: 'fail', message: 'Note not found.' });
+        }
+
+        if (note.owner_id !== req.user.id) {
+            return res.status(403).json({ status: 'fail', message: 'Only the owner can invite collaborators.' });
+        }
+
+        const { data: invitee } = await req.supabase
+            .from('users')
+            .select('id, email, username')
+            .eq('email', email)
+            .single();
+
+        if (!invitee) {
+            return res.status(404).json({ status: 'fail', message: 'No account found for that email.' });
+        }
+
+        if (invitee.id === note.owner_id) {
+            return res.status(400).json({ status: 'fail', message: 'You already own this note.' });
+        }
+
+        const current = Array.isArray(note.collaborators) ? note.collaborators : [];
+        if (current.includes(invitee.id)) {
+            return res.status(200).json({ status: 'success', message: 'Already a collaborator.' });
+        }
+
+        const { error: updateError } = await req.supabase
+            .from('notes')
+            .update({ collaborators: [...current, invitee.id] })
+            .eq('id', noteId);
+
+        if (updateError) {
+            console.error('[notes.invite]', updateError);
+            return res.status(400).json({ status: 'fail', message: 'Could not add collaborator.' });
+        }
+
+        res.status(200).json({ status: 'success', data: { user: { id: invitee.id, email: invitee.email, username: invitee.username } } });
+    } catch (err) {
+        console.error('[notes.invite]', err);
+        res.status(500).json({ status: 'fail', message: 'Could not send invite.' });
+    }
+};
+
 exports.uploadImage = async (req, res) => {
     try {
         if (!req.file) {
