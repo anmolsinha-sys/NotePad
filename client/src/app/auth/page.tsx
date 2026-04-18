@@ -4,173 +4,145 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { authApi } from '@/lib/api';
 import Cookies from 'js-cookie';
-import { Mail, Lock, User, ArrowRight, Loader2, Info } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { Mail, Lock, User, Loader2 } from 'lucide-react';
+import { toast } from 'sonner';
 
-const getFriendlyError = (err: any, isLogin: boolean): string => {
-    const status = err.response?.status;
-    const rawMsg: string = (err.response?.data?.message || '').toLowerCase();
+const friendlyError = (err: any): string => {
+    const status = err?.response?.status;
+    const raw = (err?.response?.data?.message || '').toLowerCase();
 
-    if (!navigator.onLine) return 'No internet connection. Please check your network.';
-    if (status === 401) return 'Incorrect email or password. Please try again.';
-    if (status === 409 || rawMsg.includes('duplicate') || rawMsg.includes('already exists')) {
-        if (rawMsg.includes('email')) return 'An account with this email already exists. Try logging in.';
-        if (rawMsg.includes('username')) return 'That username is taken. Please choose another one.';
-        return 'An account with these details already exists.';
+    if (err?.code === 'ERR_NETWORK') return 'Cannot reach the server.';
+    if (status === 401) return 'Incorrect email or password.';
+    if (status === 409 || raw.includes('already') || raw.includes('taken')) {
+        if (raw.includes('username')) return 'That username is taken.';
+        if (raw.includes('email')) return 'An account with this email already exists.';
+        return 'Account already exists.';
     }
-    if (status === 400) {
-        if (!isLogin && rawMsg.includes('password')) return 'Password must be at least 6 characters.';
-        return 'Please fill in all fields correctly.';
-    }
-    if (status === 500) return 'Server error. Please try again in a moment.';
-    if (status === 503 || err.code === 'ERR_NETWORK') return 'Cannot reach the server. Make sure your connection is working.';
-    return 'Something went wrong. Please try again.';
+    if (status === 400) return err?.response?.data?.message || 'Please fill in all fields.';
+    if (status === 429) return 'Too many attempts. Try again in a minute.';
+    if (status === 500) return 'Server error. Try again in a moment.';
+    return err?.response?.data?.message || 'Something went wrong.';
 };
-
 
 export default function AuthPage() {
     const [isLogin, setIsLogin] = useState(true);
     const [loading, setLoading] = useState(false);
-    const [error, setError] = useState('');
-    const [formData, setFormData] = useState({
-        username: '',
-        email: '',
-        password: '',
-    });
+    const [form, setForm] = useState({ username: '', email: '', password: '' });
     const router = useRouter();
 
-    const handleSubmit = async (e: React.FormEvent) => {
+    const submit = async (e: React.FormEvent) => {
         e.preventDefault();
         setLoading(true);
-        setError('');
-
         try {
             const res = isLogin
-                ? await authApi.login({ email: formData.email, password: formData.password })
-                : await authApi.signup(formData);
-
-            Cookies.set('token', res.data.token, { expires: 90 });
+                ? await authApi.login({ email: form.email, password: form.password })
+                : await authApi.signup(form);
+            Cookies.set('token', res.data.token, { expires: 30, sameSite: 'lax' });
+            try { localStorage.setItem('user', JSON.stringify(res.data.data.user)); } catch {}
             router.push('/dashboard');
         } catch (err: any) {
-            setError(getFriendlyError(err, isLogin));
-
+            toast.error(friendlyError(err));
         } finally {
             setLoading(false);
         }
     };
 
+    const setField = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) =>
+        setForm({ ...form, [k]: e.target.value });
+
     return (
-        <div className="min-h-screen flex items-center justify-center bg-[#0d1117] relative overflow-hidden px-4">
-            {/* Background Blobs */}
-            <div className="absolute top-[-10%] right-[-10%] w-[500px] h-[500px] bg-blue-600/10 rounded-full blur-[120px] animate-pulse"></div>
-            <div className="absolute bottom-[-10%] left-[-10%] w-[500px] h-[500px] bg-indigo-600/10 rounded-full blur-[120px] animate-pulse"></div>
-
-            <motion.div
-                initial={{ opacity: 0, y: 30 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.8, ease: "easeOut" }}
-                className="w-full max-w-md relative z-10"
-            >
-                <div className="bg-[#161b22]/70 backdrop-blur-3xl border border-white/10 rounded-3xl p-10 shadow-[0_25px_50px_-12px_rgba(0,0,0,0.5)] overflow-hidden">
-                    <div className="text-center mb-10">
-                        <h1 className="text-4xl font-extrabold bg-linear-to-r from-blue-400 to-indigo-500 bg-clip-text text-transparent mb-3 tracking-tight">
-                            {isLogin ? 'Welcome Back' : 'Get Started'}
-                        </h1>
-                        <p className="text-gray-400 text-lg">
-                            {isLogin ? 'Sign in to continue to Notepad.' : 'Create an account to start writing.'}
-                        </p>
+        <div className="min-h-screen flex items-center justify-center px-4">
+            <div className="w-full max-w-sm">
+                <div className="mb-8 flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-md flex items-center justify-center" style={{ background: 'var(--accent)' }}>
+                        <span className="font-mono text-[13px] font-bold" style={{ color: '#00120a' }}>N</span>
                     </div>
+                    <div>
+                        <h1 className="text-sm font-semibold" style={{ color: 'var(--fg)' }}>Notepad</h1>
+                        <p className="text-[11px] font-mono" style={{ color: 'var(--fg-dim)' }}>developer notes</p>
+                    </div>
+                </div>
 
-                    <form onSubmit={handleSubmit} className="space-y-6">
-                        <AnimatePresence mode='wait'>
-                            {!isLogin && (
-                                <motion.div
-                                    initial={{ opacity: 0, height: 0 }}
-                                    animate={{ opacity: 1, height: 'auto' }}
-                                    exit={{ opacity: 0, height: 0 }}
-                                    className="relative"
-                                >
-                                    <label className="text-sm font-medium text-gray-300 ml-1 mb-2 block uppercase tracking-wider">Username</label>
-                                    <div className="relative group">
-                                        <User className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500 group-focus-within:text-blue-400 transition-all duration-300" size={20} />
-                                        <input
-                                            type="text"
-                                            required={!isLogin}
-                                            placeholder="johndoe"
-                                            className="w-full bg-[#0d1117]/50 border border-white/10 rounded-xl py-4 pl-12 pr-4 text-white focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500 transition-all duration-300 placeholder:text-gray-600"
-                                            value={formData.username}
-                                            onChange={(e) => setFormData({ ...formData, username: e.target.value })}
-                                        />
-                                    </div>
-                                </motion.div>
-                            )}
-                        </AnimatePresence>
+                <div className="surface p-6">
+                    <h2 className="text-base font-medium mb-1" style={{ color: 'var(--fg)' }}>
+                        {isLogin ? 'Sign in' : 'Create account'}
+                    </h2>
+                    <p className="text-xs mb-5" style={{ color: 'var(--fg-muted)' }}>
+                        {isLogin ? 'Welcome back.' : 'Start writing in seconds.'}
+                    </p>
 
-                        <div className="relative">
-                            <label className="text-sm font-medium text-gray-300 ml-1 mb-2 block uppercase tracking-wider">Email Address</label>
-                            <div className="relative group">
-                                <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500 group-focus-within:text-blue-400 transition-all duration-300" size={20} />
+                    <form onSubmit={submit} className="space-y-3">
+                        {!isLogin && (
+                            <div className="relative">
+                                <User className="absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" size={14} style={{ color: 'var(--fg-dim)' }} />
                                 <input
-                                    type="email"
+                                    type="text"
                                     required
-                                    placeholder="name@example.com"
-                                    className="w-full bg-[#0d1117]/50 border border-white/10 rounded-xl py-4 pl-12 pr-4 text-white focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500 transition-all duration-300 placeholder:text-gray-600"
-                                    value={formData.email}
-                                    onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                                    autoComplete="username"
+                                    placeholder="Username"
+                                    className="input pl-9"
+                                    value={form.username}
+                                    onChange={setField('username')}
                                 />
                             </div>
+                        )}
+
+                        <div className="relative">
+                            <Mail className="absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" size={14} style={{ color: 'var(--fg-dim)' }} />
+                            <input
+                                type="email"
+                                required
+                                autoComplete="email"
+                                placeholder="name@example.com"
+                                className="input pl-9"
+                                value={form.email}
+                                onChange={setField('email')}
+                            />
                         </div>
 
                         <div className="relative">
-                            <label className="text-sm font-medium text-gray-300 ml-1 mb-2 block uppercase tracking-wider">Password</label>
-                            <div className="relative group">
-                                <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500 group-focus-within:text-blue-400 transition-all duration-300" size={20} />
-                                <input
-                                    type="password"
-                                    required
-                                    placeholder="••••••••"
-                                    className="w-full bg-[#0d1117]/50 border border-white/10 rounded-xl py-4 pl-12 pr-4 text-white focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500 transition-all duration-300 placeholder:text-gray-600"
-                                    value={formData.password}
-                                    onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                                />
-                            </div>
+                            <Lock className="absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" size={14} style={{ color: 'var(--fg-dim)' }} />
+                            <input
+                                type="password"
+                                required
+                                minLength={isLogin ? undefined : 8}
+                                autoComplete={isLogin ? 'current-password' : 'new-password'}
+                                placeholder="Password"
+                                className="input pl-9"
+                                value={form.password}
+                                onChange={setField('password')}
+                            />
                         </div>
 
-                        {error && (
-                            <motion.div
-                                initial={{ opacity: 0, scale: 0.9 }}
-                                animate={{ opacity: 1, scale: 1 }}
-                                className="bg-red-500/10 border border-red-500/20 text-red-500 p-4 rounded-xl flex items-center gap-3 text-sm"
-                            >
-                                <Info size={18} />
-                                {error}
-                            </motion.div>
+                        {!isLogin && (
+                            <p className="text-[11px]" style={{ color: 'var(--fg-dim)' }}>
+                                At least 8 characters.
+                            </p>
                         )}
 
                         <button
                             type="submit"
                             disabled={loading}
-                            className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-4 rounded-xl transition-all duration-300 flex items-center justify-center gap-3 group relative overflow-hidden shadow-[0_10px_20px_rgba(37,99,235,0.3)] disabled:opacity-50 disabled:cursor-not-allowed"
+                            className="btn btn-primary w-full py-2 text-sm font-medium"
                         >
-                            {loading ? <Loader2 className="animate-spin" size={20} /> : (
-                                <>
-                                    <span>{isLogin ? 'Login to Console' : 'Create Account'}</span>
-                                    <ArrowRight className="group-hover:translate-x-1.5 transition-transform duration-300" size={20} />
-                                </>
-                            )}
+                            {loading
+                                ? <Loader2 className="animate-spin" size={14} />
+                                : <span>{isLogin ? 'Sign in' : 'Create account'}</span>}
                         </button>
                     </form>
 
-                    <div className="mt-8 text-center">
+                    <div className="mt-5 text-center">
                         <button
+                            type="button"
                             onClick={() => setIsLogin(!isLogin)}
-                            className="text-gray-400 hover:text-white transition-colors duration-200 text-sm font-medium"
+                            className="text-xs hover:underline"
+                            style={{ color: 'var(--fg-muted)' }}
                         >
-                            {isLogin ? "Don't have an account? Sign up" : "Already have an account? Log in"}
+                            {isLogin ? "Don't have an account? Sign up" : 'Already have an account? Sign in'}
                         </button>
                     </div>
                 </div>
-            </motion.div>
+            </div>
         </div>
     );
 }
