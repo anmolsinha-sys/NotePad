@@ -117,6 +117,7 @@ const TiptapEditor = ({
         editorProps: {
             attributes: { class: 'focus:outline-none' },
             handleDrop(_view, event) {
+                if (!editorRef.current?.isEditable) return true;
                 const dt = (event as DragEvent).dataTransfer;
                 if (!dt || dt.files.length === 0) return false;
                 const images = Array.from(dt.files).filter((f) => f.type.startsWith('image/'));
@@ -126,6 +127,7 @@ const TiptapEditor = ({
                 return true;
             },
             handlePaste(_view, event) {
+                if (!editorRef.current?.isEditable) return true;
                 const dt = (event as ClipboardEvent).clipboardData;
                 if (!dt || dt.files.length === 0) return false;
                 const images = Array.from(dt.files).filter((f) => f.type.startsWith('image/'));

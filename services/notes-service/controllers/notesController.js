@@ -20,12 +20,14 @@ const pickUpdate = (body = {}) => {
 };
 
 const canRead = (note, user) => {
-    if (note.is_public) return { ok: true, canEdit: Boolean(user && user.id === note.owner_id) };
-    if (!user) return { ok: false };
-    if (user.id === note.owner_id) return { ok: true, canEdit: true };
-    if (Array.isArray(note.collaborators) && note.collaborators.includes(user.id)) {
-        return { ok: true, canEdit: true };
-    }
+    const isOwner = Boolean(user && user.id === note.owner_id);
+    const isEditor = Boolean(user && Array.isArray(note.collaborators) && note.collaborators.includes(user.id));
+    const isViewer = Boolean(user && Array.isArray(note.viewers) && note.viewers.includes(user.id));
+
+    if (isOwner) return { ok: true, canEdit: true };
+    if (isEditor) return { ok: true, canEdit: true };
+    if (isViewer) return { ok: true, canEdit: false };
+    if (note.is_public) return { ok: true, canEdit: false };
     return { ok: false };
 };
 
@@ -55,7 +57,7 @@ exports.getNotes = async (req, res) => {
         const { data: notes, error } = await req.supabase
             .from('notes')
             .select('*')
-            .or(`owner_id.eq.${req.user.id},collaborators.cs.{${req.user.id}}`)
+            .or(`owner_id.eq.${req.user.id},collaborators.cs.{${req.user.id}},viewers.cs.{${req.user.id}}`)
             .order('updated_at', { ascending: false });
 
         if (error) {
@@ -372,6 +374,7 @@ exports.inviteCollaborator = async (req, res) => {
     try {
         const noteId = req.params.id;
         const email = (req.body && req.body.email || '').trim().toLowerCase();
+        const role = req.body && req.body.role === 'viewer' ? 'viewer' : 'editor';
 
         if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
             return res.status(400).json({ status: 'fail', message: 'Enter a valid email.' });
@@ -379,7 +382,7 @@ exports.inviteCollaborator = async (req, res) => {
 
         const { data: note, error: fetchError } = await req.supabase
             .from('notes')
-            .select('owner_id, collaborators')
+            .select('owner_id, collaborators, viewers')
             .eq('id', noteId)
             .single();
 
@@ -405,14 +408,30 @@ exports.inviteCollaborator = async (req, res) => {
             return res.status(400).json({ status: 'fail', message: 'You already own this note.' });
         }
 
-        const current = Array.isArray(note.collaborators) ? note.collaborators : [];
-        if (current.includes(invitee.id)) {
-            return res.status(200).json({ status: 'success', message: 'Already a collaborator.' });
+        const editors = Array.isArray(note.collaborators) ? note.collaborators : [];
+        const viewers = Array.isArray(note.viewers) ? note.viewers : [];
+
+        const targetArray = role === 'viewer' ? viewers : editors;
+        const otherArray = role === 'viewer' ? editors : viewers;
+
+        // If already on the target list, no-op
+        if (targetArray.includes(invitee.id)) {
+            return res.status(200).json({ status: 'success', message: `Already a ${role}.` });
+        }
+
+        // Move across if currently on the other list (role change)
+        const update = {};
+        if (role === 'viewer') {
+            update.viewers = [...viewers, invitee.id];
+            update.collaborators = editors.filter((id) => id !== invitee.id);
+        } else {
+            update.collaborators = [...editors, invitee.id];
+            update.viewers = viewers.filter((id) => id !== invitee.id);
         }
 
         const { error: updateError } = await req.supabase
             .from('notes')
-            .update({ collaborators: [...current, invitee.id] })
+            .update(update)
             .eq('id', noteId);
 
         if (updateError) {
@@ -420,7 +439,13 @@ exports.inviteCollaborator = async (req, res) => {
             return res.status(400).json({ status: 'fail', message: 'Could not add collaborator.' });
         }
 
-        res.status(200).json({ status: 'success', data: { user: { id: invitee.id, email: invitee.email, username: invitee.username } } });
+        res.status(200).json({
+            status: 'success',
+            data: {
+                role,
+                user: { id: invitee.id, email: invitee.email, username: invitee.username },
+            },
+        });
     } catch (err) {
         console.error('[notes.invite]', err);
         res.status(500).json({ status: 'fail', message: 'Could not send invite.' });

@@ -69,3 +69,7 @@ CREATE TABLE IF NOT EXISTS note_versions (
 );
 
 CREATE INDEX IF NOT EXISTS note_versions_note_id_idx ON note_versions (note_id, created_at DESC);
+
+-- Viewer-only collaborators (read but not edit). `collaborators` stays as editor-level.
+ALTER TABLE notes
+    ADD COLUMN IF NOT EXISTS viewers UUID[] DEFAULT '{}';

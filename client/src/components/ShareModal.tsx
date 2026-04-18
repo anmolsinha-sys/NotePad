@@ -60,7 +60,7 @@ export default function ShareModal({ isOpen, onClose, noteId, noteTitle, isPubli
         }
         setIsInviting(true);
         try {
-            await notesApi.inviteCollaborator(noteId, trimmed);
+            await notesApi.inviteCollaborator(noteId, trimmed, shareRole);
             toast.success(`Invited ${trimmed} as ${shareRole}`);
             setEmail('');
         } catch (err: any) {

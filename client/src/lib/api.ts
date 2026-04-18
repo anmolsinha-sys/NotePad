@@ -37,7 +37,8 @@ export const notesApi = {
     uploadImage: (formData: FormData) => api.post('/upload', formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
     }),
-    inviteCollaborator: (id: string, email: string) => api.post(`/notes/${id}/invite`, { email }),
+    inviteCollaborator: (id: string, email: string, role: 'editor' | 'viewer' = 'editor') =>
+        api.post(`/notes/${id}/invite`, { email, role }),
     removeCollaborator: (id: string, userId: string) => api.delete(`/notes/${id}/collaborators/${userId}`),
     searchNotes: (q: string) => api.get(`/notes/search`, { params: { q } }),
     listVersions: (id: string) => api.get(`/notes/${id}/versions`),
