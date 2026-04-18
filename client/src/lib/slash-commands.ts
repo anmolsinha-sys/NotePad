@@ -57,6 +57,17 @@ const makeItems = (): SlashItem[] => [
         run: ({ editor, range }) => editor.chain().focus().deleteRange(range).setHorizontalRule().run(),
     },
     {
+        title: 'Table',
+        hint: '3 × 3',
+        keywords: ['table', 'grid'],
+        run: ({ editor, range }) =>
+            (editor.chain() as any)
+                .focus()
+                .deleteRange(range)
+                .insertTable({ rows: 3, cols: 3, withHeaderRow: true })
+                .run(),
+    },
+    {
         title: 'Image',
         keywords: ['image', 'picture', 'photo', 'upload'],
         run: ({ editor, range }) => {

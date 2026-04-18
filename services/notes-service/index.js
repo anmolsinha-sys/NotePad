@@ -124,6 +124,7 @@ const upload = multer({
 });
 
 app.get('/health', (req, res) => res.json({ status: 'ok' }));
+app.get('/api/url-meta', protect, notesController.urlMeta);
 app.get('/api/notes', protect, notesController.getNotes);
 app.get('/api/notes/search', protect, notesController.searchNotes);
 app.get('/api/notes/:id', optionalProtect, notesController.getNote);

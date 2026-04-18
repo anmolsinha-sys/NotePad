@@ -5,6 +5,10 @@ import StarterKit from '@tiptap/starter-kit';
 import Highlight from '@tiptap/extension-highlight';
 import Underline from '@tiptap/extension-underline';
 import { EnhancedCodeBlock } from '@/lib/code-block';
+import { Table } from '@tiptap/extension-table';
+import { TableRow } from '@tiptap/extension-table-row';
+import { TableHeader } from '@tiptap/extension-table-header';
+import { TableCell } from '@tiptap/extension-table-cell';
 import { common, createLowlight } from 'lowlight';
 import '@tiptap/extension-image';
 import { FlexImage } from '@/lib/flex-image';
@@ -85,6 +89,8 @@ const TiptapEditor = ({
 
     const uploadOneRef = useRef<(file: File) => Promise<string | null>>(async () => null);
     const handleDroppedImagesRef = useRef<(files: File[]) => Promise<void>>(async () => {});
+    const smartPasteUrlRef = useRef<(url: string) => void>(() => {});
+    const smartPasteCodeRef = useRef<(code: string, language: string) => void>(() => {});
 
     const saveNow = async (content: string, nextTags: string[]) => {
         if (!noteId || !editable) return;
@@ -114,6 +120,10 @@ const TiptapEditor = ({
             Placeholder.configure({ placeholder: "Start typing. '/' for commands." }),
             FlexImage.configure({ inline: true }),
             ImageGallery,
+            Table.configure({ resizable: true, HTMLAttributes: { class: 'np-table' } }),
+            TableRow,
+            TableHeader,
+            TableCell,
             SlashCommands,
             SmartSnippets,
             Wikilink,
@@ -147,12 +157,49 @@ const TiptapEditor = ({
             handlePaste(_view, event) {
                 if (!editorRef.current?.isEditable) return true;
                 const dt = (event as ClipboardEvent).clipboardData;
-                if (!dt || dt.files.length === 0) return false;
-                const images = Array.from(dt.files).filter((f) => f.type.startsWith('image/'));
-                if (images.length === 0) return false;
-                event.preventDefault();
-                handleDroppedImagesRef.current(images);
-                return true;
+                if (!dt) return false;
+
+                // Image files first
+                if (dt.files.length > 0) {
+                    const images = Array.from(dt.files).filter((f) => f.type.startsWith('image/'));
+                    if (images.length > 0) {
+                        event.preventDefault();
+                        handleDroppedImagesRef.current(images);
+                        return true;
+                    }
+                }
+
+                const text = dt.getData('text/plain');
+                if (!text) return false;
+
+                // Lone URL -> link (and async-fetch title)
+                const urlMatch = text.trim();
+                if (/^https?:\/\/\S+$/i.test(urlMatch) && !/\s/.test(urlMatch)) {
+                    event.preventDefault();
+                    smartPasteUrlRef.current(urlMatch);
+                    return true;
+                }
+
+                // JSON -> code block
+                const trimmed = text.trim();
+                if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
+                    try {
+                        const parsed = JSON.parse(trimmed);
+                        const pretty = JSON.stringify(parsed, null, 2);
+                        event.preventDefault();
+                        smartPasteCodeRef.current(pretty, 'json');
+                        return true;
+                    } catch { /* fall through */ }
+                }
+
+                // YAML-ish heuristic — multi-line with key: value, no HTML
+                if (/\n/.test(text) && /^[\w-]+:\s/.test(trimmed) && !/<[a-z][\s\S]*>/i.test(trimmed)) {
+                    event.preventDefault();
+                    smartPasteCodeRef.current(text, 'yaml');
+                    return true;
+                }
+
+                return false;
             },
         },
         onUpdate: ({ editor }) => {
@@ -201,6 +248,34 @@ const TiptapEditor = ({
     }, [editable, editor]);
 
     useEffect(() => {
+        smartPasteUrlRef.current = (url: string) => {
+            const ed = editorRef.current;
+            if (!ed) return;
+            // Insert link with URL text immediately; swap to title when available.
+            ed.chain().focus().insertContent(`<a href="${url}" target="_blank">${url}</a> `).run();
+            notesApi.urlMeta(url)
+                .then((res) => {
+                    const title = res.data?.data?.title;
+                    if (!title) return;
+                    // Best-effort replace: find the most recent instance of the raw URL link and swap text.
+                    const html = ed.getHTML();
+                    const needle = `<a href="${url}" target="_blank">${url}</a>`;
+                    if (html.includes(needle)) {
+                        const replaced = html.replace(needle, `<a href="${url}" target="_blank">${escapeHtml(title)}</a>`);
+                        ed.commands.setContent(replaced, false);
+                    }
+                })
+                .catch(() => {});
+        };
+        smartPasteCodeRef.current = (code: string, language: string) => {
+            const ed = editorRef.current;
+            if (!ed) return;
+            (ed.chain() as any).focus().insertContent({
+                type: 'codeBlock',
+                attrs: { language },
+                content: [{ type: 'text', text: code }],
+            }).run();
+        };
         uploadOneRef.current = async (file: File) => {
             const formData = new FormData();
             formData.append('image', file);
@@ -633,6 +708,15 @@ const TiptapEditor = ({
         </div>
     );
 };
+
+function escapeHtml(s: string): string {
+    return s
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
 
 function ToolButton({
     active, onClick, title, children,

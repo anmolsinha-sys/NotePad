@@ -49,6 +49,7 @@ export const notesApi = {
     searchNotes: (q: string) => api.get(`/notes/search`, { params: { q } }),
     listVersions: (id: string) => api.get(`/notes/${id}/versions`),
     restoreVersion: (id: string, versionId: string) => api.post(`/notes/${id}/versions/${versionId}/restore`),
+    urlMeta: (url: string) => api.get(`/url-meta`, { params: { url } }),
 };
 
 export default api;

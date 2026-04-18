@@ -312,6 +312,50 @@
   margin: 1.5rem 0;
 }
 
+.ProseMirror table {
+  border-collapse: collapse;
+  margin: 1rem 0;
+  overflow: hidden;
+  table-layout: fixed;
+  width: 100%;
+}
+.ProseMirror table td,
+.ProseMirror table th {
+  border: 1px solid var(--border);
+  box-sizing: border-box;
+  min-width: 1em;
+  padding: 0.4rem 0.6rem;
+  position: relative;
+  vertical-align: top;
+  font-size: 0.875rem;
+}
+.ProseMirror table th {
+  background: var(--bg-hover);
+  font-weight: 600;
+  text-align: left;
+  color: var(--fg);
+}
+.ProseMirror table p { margin: 0; }
+.ProseMirror table .selectedCell::after {
+  background: var(--accent-weak);
+  content: '';
+  left: 0; right: 0; top: 0; bottom: 0;
+  pointer-events: none;
+  position: absolute;
+  z-index: 2;
+}
+.ProseMirror .column-resize-handle {
+  background: var(--accent);
+  bottom: -2px;
+  pointer-events: none;
+  position: absolute;
+  right: -2px;
+  top: 0;
+  width: 3px;
+}
+.ProseMirror.resize-cursor { cursor: col-resize; }
+.ProseMirror .tableWrapper { overflow-x: auto; }
+
 .ProseMirror a {
   color: var(--accent-strong);
   text-decoration: underline;

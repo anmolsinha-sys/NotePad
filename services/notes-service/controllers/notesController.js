@@ -452,6 +452,75 @@ exports.inviteCollaborator = async (req, res) => {
     }
 };
 
+exports.urlMeta = async (req, res) => {
+    try {
+        const raw = (req.query.url || '').toString();
+        if (!raw) return res.status(400).json({ status: 'fail', message: 'url is required' });
+
+        let parsed;
+        try {
+            parsed = new URL(raw);
+        } catch {
+            return res.status(400).json({ status: 'fail', message: 'invalid url' });
+        }
+        if (!['http:', 'https:'].includes(parsed.protocol)) {
+            return res.status(400).json({ status: 'fail', message: 'unsupported protocol' });
+        }
+
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 5000);
+        try {
+            const resp = await fetch(parsed.toString(), {
+                signal: controller.signal,
+                headers: {
+                    'User-Agent': 'NotepadURLMeta/1.0 (+https://github.com/anmolsinha-sys/NotePad)',
+                    Accept: 'text/html,application/xhtml+xml',
+                },
+                redirect: 'follow',
+            });
+            clearTimeout(timer);
+
+            if (!resp.ok) return res.status(200).json({ status: 'success', data: { title: null, url: parsed.toString() } });
+
+            const contentType = resp.headers.get('content-type') || '';
+            if (!contentType.includes('text/html') && !contentType.includes('xhtml')) {
+                return res.status(200).json({ status: 'success', data: { title: null, url: parsed.toString() } });
+            }
+
+            // Read at most 256KB to find the <title>
+            const reader = resp.body?.getReader();
+            if (!reader) return res.status(200).json({ status: 'success', data: { title: null, url: parsed.toString() } });
+
+            const decoder = new TextDecoder();
+            let buffer = '';
+            let received = 0;
+            const MAX = 256 * 1024;
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                received += value.length;
+                buffer += decoder.decode(value, { stream: true });
+                if (received >= MAX) break;
+                if (/<\/title>/i.test(buffer)) break;
+            }
+            try { reader.cancel(); } catch {}
+
+            const titleMatch = buffer.match(/<title[^>]*>([^<]*)<\/title>/i);
+            const ogTitleMatch = buffer.match(/<meta[^>]*property=["']og:title["'][^>]*content=["']([^"']+)["'][^>]*>/i);
+            const title = ((ogTitleMatch && ogTitleMatch[1]) || (titleMatch && titleMatch[1]) || '').trim().slice(0, 200);
+
+            res.status(200).json({ status: 'success', data: { title: title || null, url: parsed.toString() } });
+        } catch (err) {
+            clearTimeout(timer);
+            console.error('[notes.urlMeta]', err);
+            res.status(200).json({ status: 'success', data: { title: null, url: parsed.toString() } });
+        }
+    } catch (err) {
+        console.error('[notes.urlMeta]', err);
+        res.status(500).json({ status: 'fail', message: 'Could not fetch metadata.' });
+    }
+};
+
 exports.uploadImage = async (req, res) => {
     try {
         if (!req.file) {
