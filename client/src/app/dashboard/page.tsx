@@ -8,11 +8,12 @@ import ShareModal from '@/components/ShareModal';
 import CommandPalette, { type PaletteItem } from '@/components/CommandPalette';
 import KeyboardHelp from '@/components/KeyboardHelp';
 import HistoryDrawer from '@/components/HistoryDrawer';
+import SettingsPanel from '@/components/SettingsPanel';
 import { exportToPDF } from '@/lib/export';
 import { htmlToMarkdown, markdownToHtml, downloadMarkdown } from '@/lib/markdown';
 import {
     Plus, Search, LogOut, Pin, Trash2, Share2,
-    FileText, Command, History, Focus,
+    FileText, Command, History, Focus, Settings as SettingsIcon,
 } from 'lucide-react';
 import Cookies from 'js-cookie';
 import { disconnectSocket, emitTitleUpdate, subscribeToTitleUpdate, subscribeToConnectionState } from '@/lib/socket';
@@ -64,6 +65,18 @@ export default function Dashboard() {
     const [isHelpOpen, setIsHelpOpen] = useState(false);
     const [isHistoryOpen, setIsHistoryOpen] = useState(false);
     const [focusMode, setFocusMode] = useState(false);
+    const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+    const [typewriter, setTypewriter] = useState(false);
+
+    useEffect(() => {
+        try {
+            const stored = localStorage.getItem('np.typewriter');
+            if (stored !== null) setTypewriter(stored === '1');
+        } catch {}
+    }, []);
+    useEffect(() => {
+        try { localStorage.setItem('np.typewriter', typewriter ? '1' : '0'); } catch {}
+    }, [typewriter]);
 
     // init
     useEffect(() => {
@@ -416,9 +429,29 @@ export default function Dashboard() {
                             <div className="text-[10px] truncate font-mono" style={{ color: 'var(--fg-dim)' }}>{user?.email}</div>
                         </div>
                     </div>
-                    <button onClick={logout} className="btn btn-ghost p-1" title="Sign out">
-                        <LogOut size={13} />
-                    </button>
+                    <div className="flex items-center gap-0.5 relative">
+                        <button
+                            onClick={() => setIsSettingsOpen((v) => !v)}
+                            className="btn btn-ghost p-1"
+                            title="Settings"
+                        >
+                            <SettingsIcon size={13} />
+                        </button>
+                        <button onClick={logout} className="btn btn-ghost p-1" title="Sign out">
+                            <LogOut size={13} />
+                        </button>
+                        {isSettingsOpen && (
+                            <>
+                                <div onClick={() => setIsSettingsOpen(false)} className="fixed inset-0 z-40" />
+                                <div className="absolute bottom-full right-0 mb-2 z-50 surface shadow-xl">
+                                    <SettingsPanel
+                                        typewriter={typewriter}
+                                        onTypewriterChange={setTypewriter}
+                                    />
+                                </div>
+                            </>
+                        )}
+                    </div>
                 </div>
             </aside>
 
@@ -483,7 +516,7 @@ export default function Dashboard() {
                 </header>
 
                 {/* Editor area */}
-                <div className="flex-1 overflow-y-auto" style={{ background: 'var(--bg)' }}>
+                <div className="flex-1 overflow-y-auto" data-scroll-root style={{ background: 'var(--bg)' }}>
                     {selectedNote ? (
                         <div className="max-w-3xl mx-auto px-8 py-8">
                             <TiptapEditor
@@ -493,6 +526,7 @@ export default function Dashboard() {
                                 initialTags={selectedNote.tags || []}
                                 isShared={true}
                                 editable={true}
+                                typewriter={typewriter}
                                 onSave={(content, tags) => {
                                     setNotes(prev => prev.map(n => n.id === selectedNote.id
                                         ? { ...n, content, tags, updated_at: new Date().toISOString() }

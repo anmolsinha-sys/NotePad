@@ -11,6 +11,7 @@ import { FlexImage } from '@/lib/flex-image';
 import Placeholder from '@tiptap/extension-placeholder';
 import { Mermaid } from '@/lib/mermaid-extension';
 import { SlashCommands } from '@/lib/slash-commands';
+import { SmartSnippets } from '@/lib/smart-snippets';
 import { ImageGallery } from '@/lib/image-gallery';
 import { useState, useEffect, useRef } from 'react';
 import {
@@ -39,6 +40,7 @@ interface EditorProps {
     onSave?: (content: string, tags: string[]) => void;
     isShared?: boolean;
     editable?: boolean;
+    typewriter?: boolean;
     onCollaboratorsChange?: (count: number) => void;
 }
 
@@ -51,6 +53,7 @@ const TiptapEditor = ({
     onSave,
     isShared,
     editable = true,
+    typewriter = false,
     onCollaboratorsChange,
 }: EditorProps) => {
     const [isSaving, setIsSaving] = useState(false);
@@ -110,6 +113,7 @@ const TiptapEditor = ({
             FlexImage.configure({ inline: true }),
             ImageGallery,
             SlashCommands,
+            SmartSnippets,
         ],
         content: initialContent,
         editable,
@@ -153,8 +157,29 @@ const TiptapEditor = ({
                     name: currentUser?.username || currentUser?.name || 'Guest',
                 });
             }
+
+            if (typewriterRef.current) {
+                const { from } = editor.state.selection;
+                try {
+                    const coords = editor.view.coordsAtPos(from);
+                    const scroller = editor.view.dom.closest('[data-scroll-root]') as HTMLElement | null;
+                    if (scroller) {
+                        const rect = scroller.getBoundingClientRect();
+                        const targetTop = rect.top + rect.height / 2;
+                        const delta = coords.top - targetTop;
+                        scroller.scrollBy({ top: delta, behavior: 'smooth' });
+                    } else {
+                        // Fallback: scroll the window
+                        const delta = coords.top - window.innerHeight / 2;
+                        window.scrollBy({ top: delta, behavior: 'smooth' });
+                    }
+                } catch {}
+            }
         },
     });
+
+    const typewriterRef = useRef(typewriter);
+    useEffect(() => { typewriterRef.current = typewriter; }, [typewriter]);
 
     useEffect(() => {
         editorRef.current = editor;
