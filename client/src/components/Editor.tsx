@@ -11,13 +11,14 @@ import ImageResize from 'tiptap-extension-resize-image';
 import Placeholder from '@tiptap/extension-placeholder';
 import { Mermaid } from '@/lib/mermaid-extension';
 import { SlashCommands } from '@/lib/slash-commands';
+import { ImageGallery } from '@/lib/image-gallery';
 import { useState, useEffect, useRef } from 'react';
 import {
     Bold, Italic, List, ListOrdered,
     Code, Quote, Undo, Redo,
     Highlighter, Underline as UnderlineIcon, Image as ImageIcon,
     Save, Download, Tag as TagIcon, X, Terminal, Sparkles, Type,
-    Heading1, Heading2, Heading3,
+    Heading1, Heading2, Heading3, Images,
 } from 'lucide-react';
 import { exportToPDF } from '@/lib/export';
 import { notesApi } from '@/lib/api';
@@ -73,6 +74,7 @@ const TiptapEditor = ({
     }, []);
 
     const fileInputRef = useRef<HTMLInputElement>(null);
+    const galleryInputRef = useRef<HTMLInputElement>(null);
 
     const saveNow = async (content: string, nextTags: string[]) => {
         if (!noteId || !editable) return;
@@ -102,6 +104,7 @@ const TiptapEditor = ({
             Placeholder.configure({ placeholder: "Start typing. '/' for commands." }),
             Image,
             ImageResize,
+            ImageGallery,
             SlashCommands,
         ],
         content: initialContent,
@@ -137,32 +140,52 @@ const TiptapEditor = ({
         return () => { if (autosaveTimer.current) clearTimeout(autosaveTimer.current); };
     }, []);
 
-    // Slash-menu -> open image picker
+    // Slash-menu -> open image / gallery picker
     useEffect(() => {
-        const openPicker = () => fileInputRef.current?.click();
-        document.addEventListener('editor:open-image-picker', openPicker);
-        return () => document.removeEventListener('editor:open-image-picker', openPicker);
+        const openImg = () => fileInputRef.current?.click();
+        const openGallery = () => galleryInputRef.current?.click();
+        document.addEventListener('editor:open-image-picker', openImg);
+        document.addEventListener('editor:open-gallery-picker', openGallery);
+        return () => {
+            document.removeEventListener('editor:open-image-picker', openImg);
+            document.removeEventListener('editor:open-gallery-picker', openGallery);
+        };
     }, []);
+
+    const uploadOne = async (file: File): Promise<string | null> => {
+        const formData = new FormData();
+        formData.append('image', file);
+        try {
+            const res = await notesApi.uploadImage(formData);
+            return res.data?.data?.url || res.data?.url || null;
+        } catch (err: any) {
+            toast.error(err?.response?.data?.message || 'Image upload failed');
+            return null;
+        }
+    };
 
     const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (!file || !editor) return;
-
-        const formData = new FormData();
-        formData.append('image', file);
-
-        try {
-            const res = await notesApi.uploadImage(formData);
-            const url = res.data?.data?.url || res.data?.url;
-            if (url) {
-                editor.chain().focus().setImage({ src: url }).run();
-            } else {
-                toast.error('No URL returned from upload');
-            }
-        } catch (err: any) {
-            toast.error(err?.response?.data?.message || 'Image upload failed');
-        }
+        const url = await uploadOne(file);
+        if (url) editor.chain().focus().setImage({ src: url }).run();
         if (fileInputRef.current) fileInputRef.current.value = '';
+    };
+
+    const handleGalleryUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const files = Array.from(e.target.files || []).slice(0, 4);
+        if (files.length === 0 || !editor) return;
+        if (files.length === 1) {
+            const url = await uploadOne(files[0]);
+            if (url) editor.chain().focus().setImage({ src: url }).run();
+        } else {
+            const results = await Promise.all(files.map(uploadOne));
+            const items = results
+                .filter((u): u is string => Boolean(u))
+                .map((src, i) => ({ src, alt: files[i]?.name || '' }));
+            if (items.length > 0) editor.chain().focus().insertGallery(items).run();
+        }
+        if (galleryInputRef.current) galleryInputRef.current.value = '';
     };
 
     // Realtime presence
@@ -321,6 +344,9 @@ const TiptapEditor = ({
                     <ToolButton onClick={() => fileInputRef.current?.click()} title="Insert image">
                         <ImageIcon size={13} />
                     </ToolButton>
+                    <ToolButton onClick={() => galleryInputRef.current?.click()} title="Insert gallery (multiple images in a row)">
+                        <Images size={13} />
+                    </ToolButton>
 
                     <Divider />
 
@@ -375,6 +401,14 @@ const TiptapEditor = ({
                 className="hidden"
                 accept="image/*"
                 onChange={handleImageUpload}
+            />
+            <input
+                type="file"
+                ref={galleryInputRef}
+                className="hidden"
+                accept="image/*"
+                multiple
+                onChange={handleGalleryUpload}
             />
 
             <div className="relative" id="editor-content-target">
