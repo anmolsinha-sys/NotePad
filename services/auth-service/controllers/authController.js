@@ -129,3 +129,22 @@ exports.protect = async (req, res, next) => {
         });
     }
 };
+
+exports.deleteAccount = async (req, res) => {
+    try {
+        const { error } = await req.supabase
+            .from('users')
+            .delete()
+            .eq('id', req.user.id);
+
+        if (error) {
+            console.error('[auth.deleteAccount]', error);
+            return res.status(400).json({ status: 'fail', message: 'Could not delete account.' });
+        }
+
+        res.status(204).end();
+    } catch (err) {
+        console.error('[auth.deleteAccount]', err);
+        res.status(500).json({ status: 'fail', message: 'Could not delete account.' });
+    }
+};

@@ -17,7 +17,7 @@ import { exportToPDF } from '@/lib/export';
 import { htmlToMarkdown, markdownToHtml, downloadMarkdown } from '@/lib/markdown';
 import {
     Plus, Search, LogOut, Pin, Trash2, Share2,
-    FileText, Command, History, Focus, Settings as SettingsIcon,
+    FileText, Command, History, Focus, Settings as SettingsIcon, Menu,
 } from 'lucide-react';
 import Cookies from 'js-cookie';
 import { disconnectSocket, emitTitleUpdate, subscribeToTitleUpdate, subscribeToConnectionState } from '@/lib/socket';
@@ -71,6 +71,7 @@ export default function Dashboard() {
     const [focusMode, setFocusMode] = useState(false);
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
     const [isGraphOpen, setIsGraphOpen] = useState(false);
+    const [isSidebarOpen, setIsSidebarOpen] = useState(false);
     const [typewriter, setTypewriter] = useState(false);
 
     useEffect(() => {
@@ -160,20 +161,44 @@ export default function Dashboard() {
         }
     }, []);
 
-    const confirmDelete = async () => {
+    const confirmDelete = () => {
         const note = pendingDelete;
         if (!note) return;
-        try {
-            await notesApi.deleteNote(note.id);
-            const updated = notes.filter(n => n.id !== note.id);
-            setNotes(updated);
-            if (selectedNote?.id === note.id) setSelectedNote(updated[0] || null);
-            toast.success('Note deleted');
-        } catch (err: any) {
-            toast.error(err?.response?.data?.message || 'Could not delete note');
-        } finally {
-            setPendingDelete(null);
+        setPendingDelete(null);
+
+        // Optimistically remove; show toast with Undo; commit after 10s.
+        setNotes((prev) => prev.filter((n) => n.id !== note.id));
+        if (selectedNote?.id === note.id) {
+            setSelectedNote((prev) => {
+                if (prev?.id !== note.id) return prev;
+                const remaining = notes.filter((n) => n.id !== note.id);
+                return remaining[0] || null;
+            });
         }
+
+        let cancelled = false;
+        const timer = setTimeout(async () => {
+            if (cancelled) return;
+            try {
+                await notesApi.deleteNote(note.id);
+            } catch (err: any) {
+                setNotes((prev) => [note, ...prev]);
+                toast.error(err?.response?.data?.message || 'Could not delete note');
+            }
+        }, 10_000);
+
+        toast(`"${note.title || 'Untitled'}" deleted`, {
+            duration: 10_000,
+            action: {
+                label: 'Undo',
+                onClick: () => {
+                    cancelled = true;
+                    clearTimeout(timer);
+                    setNotes((prev) => [note, ...prev]);
+                    setSelectedNote(note);
+                },
+            },
+        });
     };
 
     const togglePin = async (note: Note) => {
@@ -350,11 +375,22 @@ export default function Dashboard() {
             onDragOver={(e) => { e.preventDefault(); }}
             onDrop={onFilesDropped}
         >
+            {/* Mobile sidebar backdrop */}
+            {isSidebarOpen && (
+                <div
+                    className="md:hidden fixed inset-0 z-30 bg-black/50"
+                    onClick={() => setIsSidebarOpen(false)}
+                />
+            )}
+
             {/* Sidebar */}
             <aside
                 className={cn(
-                    'w-[260px] flex flex-col shrink-0 transition-all duration-150',
-                    focusMode && 'w-0 overflow-hidden opacity-0 pointer-events-none'
+                    'flex flex-col shrink-0 transition-all duration-150',
+                    'md:w-[260px]',
+                    'max-md:fixed max-md:left-0 max-md:top-0 max-md:bottom-0 max-md:z-40 max-md:w-[260px] max-md:transform',
+                    !isSidebarOpen && 'max-md:-translate-x-full',
+                    focusMode && 'md:w-0 md:overflow-hidden md:opacity-0 md:pointer-events-none'
                 )}
                 style={{ borderRight: '1px solid var(--border)', background: 'var(--bg-panel)' }}
             >
@@ -493,11 +529,19 @@ export default function Dashboard() {
                 {/* Header */}
                 <header
                     className={cn(
-                        'h-11 px-4 flex items-center justify-between gap-3 shrink-0 transition-opacity duration-150',
+                        'h-11 px-3 md:px-4 flex items-center justify-between gap-2 md:gap-3 shrink-0 transition-opacity duration-150',
                         focusMode && 'opacity-30 hover:opacity-100'
                     )}
                     style={{ borderBottom: '1px solid var(--border)', background: 'var(--bg-panel)' }}
                 >
+                    <button
+                        type="button"
+                        onClick={() => setIsSidebarOpen(true)}
+                        className="md:hidden btn btn-ghost p-1"
+                        aria-label="Open sidebar"
+                    >
+                        <Menu size={14} />
+                    </button>
                     {selectedNote ? (
                         <input
                             key={selectedNote.id}

@@ -4,7 +4,7 @@ import { useEditor, EditorContent, BubbleMenu } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import Highlight from '@tiptap/extension-highlight';
 import Underline from '@tiptap/extension-underline';
-import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight';
+import { EnhancedCodeBlock } from '@/lib/code-block';
 import { common, createLowlight } from 'lowlight';
 import '@tiptap/extension-image';
 import { FlexImage } from '@/lib/flex-image';
@@ -109,7 +109,7 @@ const TiptapEditor = ({
             StarterKit.configure({ codeBlock: false }),
             Underline,
             Highlight.configure({ multicolor: true }),
-            CodeBlockLowlight.configure({ lowlight }),
+            EnhancedCodeBlock.configure({ lowlight }),
             Mermaid,
             Placeholder.configure({ placeholder: "Start typing. '/' for commands." }),
             FlexImage.configure({ inline: true }),

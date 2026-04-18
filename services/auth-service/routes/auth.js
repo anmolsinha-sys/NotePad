@@ -13,5 +13,6 @@ router.get('/validate', authController.protect, (req, res) => {
         },
     });
 });
+router.delete('/account', authController.protect, authController.deleteAccount);
 
 module.exports = router;

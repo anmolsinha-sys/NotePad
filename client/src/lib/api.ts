@@ -26,6 +26,12 @@ export const authApi = {
             headers: { Authorization: `Bearer ${token}` },
         });
     },
+    deleteAccount: () => {
+        const token = Cookies.get('token');
+        return axios.delete(`${AUTH_URL}/account`, {
+            headers: { Authorization: `Bearer ${token}` },
+        });
+    },
 };
 
 export const notesApi = {

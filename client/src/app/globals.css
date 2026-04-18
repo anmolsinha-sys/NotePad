@@ -247,16 +247,56 @@
   font-size: 0.8125rem;
   background: var(--bg);
   border: 1px solid var(--border);
-  border-radius: var(--radius-md);
+  border-radius: 0 0 var(--radius-md) var(--radius-md);
   padding: 0.875rem 1rem;
-  margin: 1rem 0;
+  margin: 0;
   overflow-x: auto;
   line-height: 1.55;
+  border-top: none;
 }
 .ProseMirror pre code {
   background: transparent;
   border: none;
   padding: 0;
+}
+
+.ProseMirror .code-block-wrap {
+  margin: 1rem 0;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+.ProseMirror .code-block-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.3rem 0.75rem;
+  background: var(--bg-hover);
+  border: 1px solid var(--border);
+  border-bottom: none;
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+}
+.ProseMirror .code-block-lang {
+  color: var(--fg-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: 600;
+}
+.ProseMirror .code-block-copy {
+  padding: 1px 7px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  color: var(--fg-muted);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: inherit;
+  transition: color 120ms, border-color 120ms;
+}
+.ProseMirror .code-block-copy:hover {
+  color: var(--accent-strong);
+  border-color: var(--accent);
 }
 
 .ProseMirror mark {

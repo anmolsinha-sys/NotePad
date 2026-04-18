@@ -1,9 +1,13 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Sun, Moon, Monitor, Check } from 'lucide-react';
+import { Sun, Moon, Monitor, Check, Bookmark, AlertTriangle } from 'lucide-react';
 import { ACCENTS, type AccentName, type ThemeMode, getStoredAccent, getStoredMode, setAccent, setMode } from '@/lib/theme';
 import { cn } from '@/lib/utils';
+import { toast } from 'sonner';
+import { authApi } from '@/lib/api';
+import Cookies from 'js-cookie';
+import { useRouter } from 'next/navigation';
 
 export default function SettingsPanel({
     typewriter,
@@ -12,12 +16,16 @@ export default function SettingsPanel({
     typewriter: boolean;
     onTypewriterChange: (v: boolean) => void;
 }) {
+    const router = useRouter();
     const [mode, setModeState] = useState<ThemeMode>('dark');
     const [accent, setAccentState] = useState<AccentName>('emerald');
+    const [danger, setDanger] = useState(false);
+    const [origin, setOrigin] = useState<string>('');
 
     useEffect(() => {
         setModeState(getStoredMode());
         setAccentState(getStoredAccent());
+        if (typeof window !== 'undefined') setOrigin(window.location.origin);
     }, []);
 
     const handleMode = (m: ThemeMode) => {
@@ -30,8 +38,23 @@ export default function SettingsPanel({
         setAccent(a);
     };
 
+    const bookmarklet = `javascript:(function(){var s=getSelection().toString();var u=location.href;var t=document.title;window.open('${origin}/clip?t='+encodeURIComponent(t)+'&u='+encodeURIComponent(u)+'&s='+encodeURIComponent(s),'_blank')})();`;
+
+    const deleteAccount = async () => {
+        if (!confirm('This deletes your account and ALL your notes permanently. Type yes to confirm.')) return;
+        try {
+            await authApi.deleteAccount();
+            Cookies.remove('token');
+            try { localStorage.removeItem('user'); } catch {}
+            toast.success('Account deleted');
+            router.replace('/auth');
+        } catch (err: any) {
+            toast.error(err?.response?.data?.message || 'Could not delete account');
+        }
+    };
+
     return (
-        <div className="w-[240px] p-3 space-y-3">
+        <div className="w-[280px] p-3 space-y-3">
             <div>
                 <div className="text-[10px] uppercase tracking-wide font-medium mb-1.5" style={{ color: 'var(--fg-dim)' }}>Theme</div>
                 <div className="flex gap-1">
@@ -44,9 +67,7 @@ export default function SettingsPanel({
                             key={value}
                             type="button"
                             onClick={() => handleMode(value)}
-                            className={cn(
-                                'flex-1 flex items-center justify-center gap-1 py-1.5 rounded-xs border text-[11px] transition-colors',
-                            )}
+                            className={cn('flex-1 flex items-center justify-center gap-1 py-1.5 rounded-xs border text-[11px] transition-colors')}
                             style={{
                                 borderColor: mode === value ? 'var(--accent)' : 'var(--border)',
                                 background: mode === value ? 'var(--accent-weak)' : 'transparent',
@@ -106,6 +127,57 @@ export default function SettingsPanel({
                         />
                     </span>
                 </label>
+            </div>
+
+            <div className="h-px" style={{ background: 'var(--border)' }} />
+
+            <div>
+                <div className="text-[10px] uppercase tracking-wide font-medium mb-1.5 flex items-center gap-1" style={{ color: 'var(--fg-dim)' }}>
+                    <Bookmark size={10} /> Web clipper
+                </div>
+                <p className="text-[11px] mb-1.5" style={{ color: 'var(--fg-muted)' }}>
+                    Drag this to your bookmarks bar. Click it on any page to save the selection as a note.
+                </p>
+                {origin && (
+                    <a
+                        href={bookmarklet}
+                        onClick={(e) => e.preventDefault()}
+                        className="block px-2 py-1 rounded-xs text-[11px] font-mono text-center"
+                        style={{
+                            background: 'var(--accent-weak)',
+                            color: 'var(--accent-strong)',
+                            border: '1px solid color-mix(in oklab, var(--accent) 30%, transparent)',
+                            cursor: 'grab',
+                        }}
+                        draggable
+                    >
+                        + Clip to Notepad
+                    </a>
+                )}
+            </div>
+
+            <div className="h-px" style={{ background: 'var(--border)' }} />
+
+            <div>
+                <button
+                    type="button"
+                    onClick={() => setDanger((v) => !v)}
+                    className="text-[11px] flex items-center gap-1"
+                    style={{ color: 'var(--fg-dim)' }}
+                >
+                    <AlertTriangle size={11} />
+                    {danger ? 'Hide danger zone' : 'Danger zone'}
+                </button>
+                {danger && (
+                    <button
+                        type="button"
+                        onClick={deleteAccount}
+                        className="mt-2 w-full text-xs px-2 py-1.5 rounded-xs"
+                        style={{ background: 'transparent', border: '1px solid #ef4444', color: '#ef4444' }}
+                    >
+                        Delete my account permanently
+                    </button>
+                )}
             </div>
         </div>
     );
