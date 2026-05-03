@@ -1,11 +1,11 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { Sun, Moon, Monitor, Check, Bookmark, AlertTriangle } from 'lucide-react';
+import { Sun, Moon, Monitor, Check, Bookmark, AlertTriangle, X as XIcon } from 'lucide-react';
 import { ACCENTS, type AccentName, type ThemeMode, getStoredAccent, getStoredMode, setAccent, setMode } from '@/lib/theme';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
-import { authApi } from '@/lib/api';
+import { authApi, notesApi } from '@/lib/api';
 import Cookies from 'js-cookie';
 import { useRouter } from 'next/navigation';
 
@@ -23,6 +23,8 @@ export default function SettingsPanel({
     const [origin, setOrigin] = useState<string>('');
     const bookmarkletRef = useRef<HTMLAnchorElement>(null);
     const [copied, setCopied] = useState(false);
+    const [showInstall, setShowInstall] = useState(false);
+    const [testing, setTesting] = useState(false);
 
     const bookmarkletUrl = origin
         ? `javascript:(function(){var s=getSelection().toString();var u=location.href;var t=document.title;window.open('${origin}/clip?t='+encodeURIComponent(t)+'&u='+encodeURIComponent(u)+'&s='+encodeURIComponent(s),'_blank');})();`
@@ -45,20 +47,33 @@ export default function SettingsPanel({
         try {
             await navigator.clipboard.writeText(bookmarkletUrl);
             setCopied(true);
-            toast.success('Bookmarklet URL copied. Paste it as a new bookmark.');
+            setShowInstall(true);
             setTimeout(() => setCopied(false), 2500);
         } catch {
-            toast.error('Could not copy. Drag the link to your bookmarks bar instead.');
+            // Fallback: still show the install dialog so user can copy manually.
+            setShowInstall(true);
         }
     };
 
-    const testClipper = () => {
-        if (!origin) return;
-        const title = document.title || 'Test clip';
-        const sel = (typeof window !== 'undefined' && window.getSelection?.()?.toString()) || 'Test selection from this page.';
-        const url = typeof window !== 'undefined' ? window.location.href : '';
-        const dest = `${origin}/clip?t=${encodeURIComponent(title)}&u=${encodeURIComponent(url)}&s=${encodeURIComponent(sel)}`;
-        window.open(dest, '_blank');
+    const testClipper = async () => {
+        if (testing) return;
+        setTesting(true);
+        try {
+            const title = `Test clip — ${new Date().toLocaleTimeString()}`;
+            const url = typeof window !== 'undefined' ? window.location.href : '';
+            const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({
+                '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+            }[c]!));
+            const content = `<p>This is a test clip created from your Notepad settings to confirm the web clipper works.</p>${
+                url ? `<p><em>Source: <a href="${esc(url)}" target="_blank" rel="noreferrer">${esc(url)}</a></em></p>` : ''
+            }`;
+            await notesApi.createNote({ title, content, tags: ['clip', 'test'] });
+            toast.success('Test clip saved. Look for it in your notes list.');
+        } catch (err: any) {
+            toast.error(err?.response?.data?.message || 'Test clip failed — check your connection');
+        } finally {
+            setTesting(false);
+        }
     };
 
     const handleMode = (m: ThemeMode) => {
@@ -191,21 +206,23 @@ export default function SettingsPanel({
                                 type="button"
                                 onClick={copyBookmarklet}
                                 className="btn btn-ghost text-[11px] flex-1 py-1"
+                                title="Copy the bookmarklet URL and show install instructions"
                             >
-                                {copied ? 'Copied ✓' : 'Copy URL'}
+                                {copied ? 'Copied ✓' : 'Install…'}
                             </button>
                             <button
                                 type="button"
                                 onClick={testClipper}
+                                disabled={testing}
                                 className="btn btn-ghost text-[11px] flex-1 py-1"
+                                title="Create a test clip to verify the clipper works"
                             >
-                                Test
+                                {testing ? 'Testing…' : 'Test'}
                             </button>
                         </div>
                         <p className="text-[10px] mt-1.5" style={{ color: 'var(--fg-dim)' }}>
-                            <strong>How:</strong> drag the link above to your bookmarks bar.
-                            If dragging doesn&rsquo;t work (some browsers block it), click
-                            <em> Copy URL</em> and paste it as the URL of a new bookmark.
+                            <strong>How:</strong> drag the link above to your bookmarks bar, or click
+                            <em> Install…</em> for step-by-step paste instructions.
                         </p>
                     </>
                 )}
@@ -234,6 +251,84 @@ export default function SettingsPanel({
                     </button>
                 )}
             </div>
+
+            {showInstall && bookmarkletUrl && (
+                <div
+                    className="fixed inset-0 z-[60] flex items-center justify-center p-4"
+                    onClick={() => setShowInstall(false)}
+                >
+                    <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
+                    <div
+                        className="relative w-full max-w-md p-5 rounded surface"
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <button
+                            type="button"
+                            onClick={() => setShowInstall(false)}
+                            className="absolute top-2 right-2 btn btn-ghost p-1"
+                            aria-label="Close"
+                        >
+                            <XIcon size={12} />
+                        </button>
+                        <h3 className="text-sm font-semibold mb-1 flex items-center gap-1.5" style={{ color: 'var(--fg)' }}>
+                            <Bookmark size={12} /> Install the web clipper
+                        </h3>
+                        <p className="text-[11px] mb-3" style={{ color: 'var(--fg-muted)' }}>
+                            {copied
+                                ? 'Bookmarklet URL is in your clipboard.'
+                                : 'Copy the URL below — clipboard access was blocked.'}
+                            {' '}Add it as a new bookmark in your browser:
+                        </p>
+                        <ol className="text-[11px] list-decimal pl-4 space-y-1 mb-3" style={{ color: 'var(--fg-muted)' }}>
+                            <li>Show the bookmarks bar (Chrome/Edge: <span className="kbd">⌘⇧B</span>, Firefox: <span className="kbd">⌘⇧B</span>).</li>
+                            <li>Right-click the bookmarks bar → <em>Add page…</em> / <em>Add bookmark…</em>.</li>
+                            <li>Set Name: <strong>Clip to Notepad</strong>.</li>
+                            <li>Paste the URL below into the URL/location field.</li>
+                            <li>Save. Open any page, select text, click the bookmark.</li>
+                        </ol>
+                        <div className="text-[10px] uppercase tracking-wide font-medium mb-1" style={{ color: 'var(--fg-dim)' }}>
+                            Bookmarklet URL
+                        </div>
+                        <textarea
+                            readOnly
+                            value={bookmarkletUrl}
+                            onFocus={(e) => e.currentTarget.select()}
+                            className="w-full text-[10px] font-mono p-2 rounded-xs"
+                            style={{
+                                background: 'var(--bg)',
+                                border: '1px solid var(--border)',
+                                color: 'var(--fg)',
+                                minHeight: 70,
+                                resize: 'vertical',
+                                wordBreak: 'break-all',
+                            }}
+                        />
+                        <div className="flex gap-1.5 mt-3 justify-end">
+                            <button
+                                type="button"
+                                onClick={async () => {
+                                    try {
+                                        await navigator.clipboard.writeText(bookmarkletUrl);
+                                        toast.success('Copied');
+                                    } catch {
+                                        toast.error('Copy blocked — select the text manually');
+                                    }
+                                }}
+                                className="btn btn-primary text-[11px] py-1"
+                            >
+                                Copy again
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setShowInstall(false)}
+                                className="btn btn-ghost text-[11px] py-1"
+                            >
+                                Done
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

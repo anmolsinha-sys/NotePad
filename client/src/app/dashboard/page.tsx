@@ -164,13 +164,27 @@ export default function Dashboard() {
 
     // actions
     const createNote = useCallback(async () => {
+        // Optimistic insert: render the new note immediately so the click feels instant.
+        // The Editor skips autosave/socket emit while the id starts with `temp-`.
+        const tempId = `temp-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+        const optimistic: Note = {
+            id: tempId,
+            title: 'Untitled',
+            content: '',
+            tags: [],
+            updated_at: new Date().toISOString(),
+        };
+        setNotes(prev => [optimistic, ...prev]);
+        setSelectedNote(optimistic);
+
         try {
             const res = await notesApi.createNote({ title: 'Untitled', content: '', tags: [] });
-            const note: Note = res.data.data.note;
-            setNotes(prev => [note, ...prev]);
-            setSelectedNote(note);
-            toast.success('Note created');
+            const real: Note = res.data.data.note;
+            setNotes(prev => prev.map(n => n.id === tempId ? real : n));
+            setSelectedNote(prev => prev?.id === tempId ? real : prev);
         } catch (err: any) {
+            setNotes(prev => prev.filter(n => n.id !== tempId));
+            setSelectedNote(prev => prev?.id === tempId ? null : prev);
             toast.error(err?.response?.data?.message || 'Could not create note');
         }
     }, []);

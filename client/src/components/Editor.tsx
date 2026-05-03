@@ -11,6 +11,7 @@ import { Table } from '@tiptap/extension-table';
 import { TableRow } from '@tiptap/extension-table-row';
 import { TableHeader } from '@tiptap/extension-table-header';
 import { TableCell } from '@tiptap/extension-table-cell';
+import Link from '@tiptap/extension-link';
 import { common, createLowlight } from 'lowlight';
 import '@tiptap/extension-image';
 import { FlexImage } from '@/lib/flex-image';
@@ -96,9 +97,12 @@ const TiptapEditor = ({
     const handleDroppedImagesRef = useRef<(files: File[]) => Promise<void>>(async () => {});
     const smartPasteUrlRef = useRef<(url: string) => void>(() => {});
     const smartPasteCodeRef = useRef<(code: string, language: string) => void>(() => {});
+    const typewriterScrollRaf = useRef<number | null>(null);
+
+    const isTempId = noteId?.startsWith('temp-') ?? false;
 
     const saveNow = async (content: string, nextTags: string[]) => {
-        if (!noteId || !editable) return;
+        if (!noteId || !editable || isTempId) return;
         setIsSaving(true);
         try {
             const payload = wrapContent ? await wrapContent(content) : content;
@@ -132,6 +136,13 @@ const TiptapEditor = ({
             TableRow,
             TableHeader,
             TableCell,
+            Link.configure({
+                openOnClick: false,
+                autolink: true,
+                linkOnPaste: false,
+                protocols: ['http', 'https', 'mailto'],
+                HTMLAttributes: { target: '_blank', rel: 'noreferrer noopener nofollow' },
+            }),
             SlashCommands,
             SmartSnippets,
             Wikilink,
@@ -180,16 +191,24 @@ const TiptapEditor = ({
                 const text = dt.getData('text/plain');
                 if (!text) return false;
 
-                // Lone URL -> link (and async-fetch title)
-                const urlMatch = text.trim();
-                if (/^https?:\/\/\S+$/i.test(urlMatch) && !/\s/.test(urlMatch)) {
+                const trimmedAll = text.trim();
+
+                // Block bookmarklet source — user is trying to install, not paste.
+                if (/^javascript:/i.test(trimmedAll)) {
                     event.preventDefault();
-                    smartPasteUrlRef.current(urlMatch);
+                    toast.info('That looks like a bookmarklet. Add it as a new browser bookmark instead of pasting it here.');
+                    return true;
+                }
+
+                // Lone URL -> link (and async-fetch title)
+                if (/^https?:\/\/\S+$/i.test(trimmedAll) && !/\s/.test(trimmedAll)) {
+                    event.preventDefault();
+                    smartPasteUrlRef.current(trimmedAll);
                     return true;
                 }
 
                 // JSON -> code block
-                const trimmed = text.trim();
+                const trimmed = trimmedAll;
                 if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
                     try {
                         const parsed = JSON.parse(trimmed);
@@ -213,7 +232,7 @@ const TiptapEditor = ({
         onUpdate: ({ editor }) => {
             if (isApplyingRemoteUpdate.current) return;
             const content = editor.getHTML();
-            if (noteId && isShared && content !== lastEmittedContent.current) {
+            if (noteId && isShared && !isTempId && content !== lastEmittedContent.current) {
                 lastEmittedContent.current = content;
                 emitNoteUpdate(noteId, content);
             }
@@ -227,28 +246,38 @@ const TiptapEditor = ({
                 });
             }
 
-            if (typewriterRef.current) {
-                const { from } = editor.state.selection;
-                try {
-                    const coords = editor.view.coordsAtPos(from);
-                    const scroller = editor.view.dom.closest('[data-scroll-root]') as HTMLElement | null;
-                    if (scroller) {
-                        const rect = scroller.getBoundingClientRect();
-                        const targetTop = rect.top + rect.height / 2;
-                        const delta = coords.top - targetTop;
-                        scroller.scrollBy({ top: delta, behavior: 'smooth' });
-                    } else {
-                        // Fallback: scroll the window
-                        const delta = coords.top - window.innerHeight / 2;
-                        window.scrollBy({ top: delta, behavior: 'smooth' });
-                    }
-                } catch {}
+            // Typewriter mode: re-center the caret. Skip while a range is being selected,
+            // because firing scrollBy on every selection update during a drag-select stacks
+            // smooth-scroll animations and makes the page feel jumpy / hyper-sensitive.
+            if (typewriterRef.current && editor.state.selection.empty) {
+                if (typewriterScrollRaf.current) cancelAnimationFrame(typewriterScrollRaf.current);
+                typewriterScrollRaf.current = requestAnimationFrame(() => {
+                    typewriterScrollRaf.current = null;
+                    if (editor.isDestroyed) return;
+                    try {
+                        const { from } = editor.state.selection;
+                        const coords = editor.view.coordsAtPos(from);
+                        const scroller = editor.view.dom.closest('[data-scroll-root]') as HTMLElement | null;
+                        if (scroller) {
+                            const rect = scroller.getBoundingClientRect();
+                            const targetTop = rect.top + rect.height / 2;
+                            const delta = coords.top - targetTop;
+                            if (Math.abs(delta) > 8) scroller.scrollBy({ top: delta, behavior: 'auto' });
+                        } else {
+                            const delta = coords.top - window.innerHeight / 2;
+                            if (Math.abs(delta) > 8) window.scrollBy({ top: delta, behavior: 'auto' });
+                        }
+                    } catch {}
+                });
             }
         },
     });
 
     const typewriterRef = useRef(typewriter);
     useEffect(() => { typewriterRef.current = typewriter; }, [typewriter]);
+    useEffect(() => () => {
+        if (typewriterScrollRaf.current) cancelAnimationFrame(typewriterScrollRaf.current);
+    }, []);
 
     useEffect(() => {
         editorRef.current = editor;
@@ -259,19 +288,31 @@ const TiptapEditor = ({
         smartPasteUrlRef.current = (url: string) => {
             const ed = editorRef.current;
             if (!ed) return;
-            // Insert link with URL text immediately; swap to title when available.
-            ed.chain().focus().insertContent(`<a href="${url}" target="_blank">${url}</a> `).run();
+            // Insert link via the Link mark so it renders as a clickable anchor, not raw HTML text.
+            const insertLink = (text: string) => {
+                ed.chain()
+                    .focus()
+                    .insertContent([
+                        { type: 'text', text, marks: [{ type: 'link', attrs: { href: url } }] },
+                        { type: 'text', text: ' ' },
+                    ])
+                    .run();
+            };
+            const startPos = ed.state.selection.from;
+            insertLink(url);
             notesApi.urlMeta(url)
                 .then((res) => {
                     const title = res.data?.data?.title;
-                    if (!title) return;
-                    // Best-effort replace: find the most recent instance of the raw URL link and swap text.
-                    const html = ed.getHTML();
-                    const needle = `<a href="${url}" target="_blank">${url}</a>`;
-                    if (html.includes(needle)) {
-                        const replaced = html.replace(needle, `<a href="${url}" target="_blank">${escapeHtml(title)}</a>`);
-                        ed.commands.setContent(replaced, false);
-                    }
+                    if (!title || ed.isDestroyed) return;
+                    // Replace the URL text we just inserted with the resolved title.
+                    const endPos = startPos + url.length;
+                    ed.chain()
+                        .focus()
+                        .insertContentAt(
+                            { from: startPos, to: endPos },
+                            { type: 'text', text: title, marks: [{ type: 'link', attrs: { href: url } }] }
+                        )
+                        .run();
                 })
                 .catch(() => {});
         };
@@ -379,7 +420,7 @@ const TiptapEditor = ({
 
     // Realtime presence
     useEffect(() => {
-        if (!(noteId && isShared && editor)) return;
+        if (!(noteId && isShared && editor) || isTempId) return;
 
         const userName = currentUser?.username || currentUser?.name || `Guest-${Math.floor(Math.random() * 1000)}`;
         const userEmail = currentUser?.email || 'guest@notepad.local';
@@ -729,15 +770,6 @@ const TiptapEditor = ({
         </div>
     );
 };
-
-function escapeHtml(s: string): string {
-    return s
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#39;');
-}
 
 function ToolButton({
     active, onClick, title, children,

@@ -379,6 +379,13 @@
 /* Editor root must be positioned so free-mode images anchor to it */
 #editor-content-target { position: relative; min-height: 60vh; }
 
+/* Scroll containers shouldn't chain scroll into the page during selection drag — */
+/* prevents the "very sensitive scroll while selecting text" feel. */
+[data-scroll-root] {
+  overscroll-behavior: contain;
+  scroll-padding-block: 48px;
+}
+
 .ProseMirror img {
   max-width: 100%;
   height: auto;
